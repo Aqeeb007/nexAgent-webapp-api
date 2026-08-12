@@ -4,6 +4,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 
 export const DATABASE = 'DATABASE';
 
+export type Database = ReturnType<typeof drizzle>;
+
 @Global()
 @Module({
   providers: [
