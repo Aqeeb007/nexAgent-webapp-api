@@ -1,11 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import * as bcrypt from 'bcrypt';
+import { UsersService } from 'src/users/users.service';
 
 @Injectable()
 export class AuthService {
-  create(registerDto: RegisterDto) {
-    return 'This action adds a new auth';
+  constructor(private readonly usersService: UsersService) {}
+  async register(registerDto: RegisterDto) {
+    const hashedPassword = await bcrypt.hash(registerDto.password, 10);
+
+    return this.usersService.createUser({
+      email: registerDto.email,
+      passwordHash: hashedPassword,
+      firstName: registerDto.firstName,
+      lastName: registerDto.lastName,
+    });
   }
 
   findAll() {

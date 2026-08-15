@@ -15,9 +15,9 @@ import { LoginDto } from './dto/login.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post()
-  create(@Body() registerDto: RegisterDto) {
-    return this.authService.create(registerDto);
+  @Post('register')
+  register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
   }
 
   @Get()
@@ -37,6 +37,6 @@ export class AuthController {
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.authService.remove(+id);
+    return `This action removes a #${id} auth`;
   }
 }
