@@ -2,7 +2,7 @@ import { ConflictException, Inject, Injectable } from '@nestjs/common';
 
 import { eq } from 'drizzle-orm';
 
-import { DATABASE } from '../database/database.module';
+import { type Database, DATABASE } from '../database/database.module';
 
 import { users } from '../database/schema/users';
 
@@ -10,7 +10,7 @@ import { users } from '../database/schema/users';
 export class UsersService {
   constructor(
     @Inject(DATABASE)
-    private readonly db: any,
+    private readonly db: Database,
   ) {}
 
   async findByEmail(email: string) {
