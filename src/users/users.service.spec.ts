@@ -88,7 +88,6 @@ describe('UsersService', () => {
     };
 
     it('inserts and returns the new user when the email is free', async () => {
-      mockDb.limit.mockResolvedValueOnce([]); // internal findByEmail -> nobody found
       const insertedUser = {
         id: 'uuid-1',
         email: newUser.email,
@@ -107,13 +106,37 @@ describe('UsersService', () => {
       expect(result).toEqual(insertedUser);
     });
 
-    it('throws ConflictException when the email is already registered', async () => {
-      mockDb.limit.mockResolvedValueOnce([{ id: 'existing-id' }]); // internal findByEmail -> found
+    it('throws ConflictException when the DB rejects a duplicate email', async () => {
+      mockDb.returning.mockRejectedValueOnce({ code: '23505' });
 
       await expect(service.createUser(newUser)).rejects.toThrow(
         ConflictException,
       );
+    });
+
+    it('rethrows unrelated database errors', async () => {
+      const dbError = new Error('connection lost');
+      mockDb.returning.mockRejectedValueOnce(dbError);
+
+      await expect(service.createUser(newUser)).rejects.toThrow(dbError);
+    });
+
+    it('runs the insert against the given transaction when one is provided', async () => {
+      const insertedUser = { id: 'uuid-1', ...newUser };
+      const mockTx = {
+        insert: jest.fn().mockReturnThis(),
+        values: jest.fn().mockReturnThis(),
+        returning: jest.fn().mockResolvedValueOnce([insertedUser]),
+      };
+
+      const result = await service.createUser(
+        newUser,
+        mockTx as unknown as Parameters<typeof service.createUser>[1],
+      );
+
+      expect(mockTx.insert).toHaveBeenCalled();
       expect(mockDb.insert).not.toHaveBeenCalled();
+      expect(result).toEqual(insertedUser);
     });
   });
 });

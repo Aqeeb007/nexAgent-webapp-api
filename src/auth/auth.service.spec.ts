@@ -6,6 +6,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { DATABASE } from '../database/database.module';
+import { UsersService } from '../users/users.service';
 
 jest.mock('bcrypt');
 
@@ -15,7 +16,8 @@ describe('AuthService', () => {
   // register() runs everything inside `this.db.transaction(async (tx) => ...)`.
   // mockTx stands in for the `tx` query builder passed into that callback;
   // mockDb.transaction just invokes the callback with it, the same way the
-  // real Drizzle transaction() does.
+  // real Drizzle transaction() does. User creation itself is delegated to
+  // UsersService, so it's mocked directly rather than driven through mockTx.
   let mockTx: {
     select: jest.Mock;
     from: jest.Mock;
@@ -26,6 +28,7 @@ describe('AuthService', () => {
     returning: jest.Mock;
   };
   let mockDb: { transaction: jest.Mock };
+  let mockUsersService: { createUser: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -42,9 +45,16 @@ describe('AuthService', () => {
     mockDb = {
       transaction: jest.fn((callback) => callback(mockTx)),
     };
+    mockUsersService = {
+      createUser: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AuthService, { provide: DATABASE, useValue: mockDb }],
+      providers: [
+        AuthService,
+        { provide: DATABASE, useValue: mockDb },
+        { provide: UsersService, useValue: mockUsersService },
+      ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
@@ -78,22 +88,21 @@ describe('AuthService', () => {
 
     it('creates the user, their organization, and an owner membership', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-      mockTx.limit
-        .mockResolvedValueOnce([]) // 1st select+limit: no existing user with this email
-        .mockResolvedValueOnce([ownerRole]); // 2nd select+limit: the "owner" role lookup
-      mockTx.returning
-        .mockResolvedValueOnce([insertedUser]) // 1st insert+returning: the new user row
-        .mockResolvedValueOnce([insertedOrganization]); // 2nd insert+returning: the new org row
+      mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
+      mockTx.limit.mockResolvedValueOnce([ownerRole]); // select+limit: the "owner" role lookup
+      mockTx.returning.mockResolvedValueOnce([insertedOrganization]); // insert+returning: the new org row
 
       const result = await service.register(registerDto);
 
       // Never store the plain-text password, only the bcrypt hash
       expect(bcrypt.hash).toHaveBeenCalledWith(registerDto.password, 12);
-      expect(mockTx.values).toHaveBeenCalledWith(
+      expect(mockUsersService.createUser).toHaveBeenCalledWith(
         expect.objectContaining({ passwordHash: 'hashed-password' }),
+        mockTx,
       );
-      expect(mockTx.values).not.toHaveBeenCalledWith(
+      expect(mockUsersService.createUser).not.toHaveBeenCalledWith(
         expect.objectContaining({ password: registerDto.password }),
+        mockTx,
       );
 
       // The membership ties the new user to the new org via the owner role
@@ -109,8 +118,10 @@ describe('AuthService', () => {
       });
     });
 
-    it('throws ConflictException and creates nothing when the email is already registered', async () => {
-      mockTx.limit.mockResolvedValueOnce([{ id: 'existing-user' }]); // email already exists
+    it('propagates the ConflictException and creates nothing else when the email is already registered', async () => {
+      mockUsersService.createUser.mockRejectedValueOnce(
+        new ConflictException('Email already registered'),
+      );
 
       await expect(service.register(registerDto)).rejects.toThrow(
         ConflictException,
@@ -120,15 +131,22 @@ describe('AuthService', () => {
 
     it('throws InternalServerErrorException when the "owner" role is not seeded', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-      mockTx.limit
-        .mockResolvedValueOnce([]) // no existing user
-        .mockResolvedValueOnce([]); // owner role missing
-      mockTx.returning
-        .mockResolvedValueOnce([insertedUser])
-        .mockResolvedValueOnce([insertedOrganization]);
+      mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
+      mockTx.limit.mockResolvedValueOnce([]); // owner role missing
+      mockTx.returning.mockResolvedValueOnce([insertedOrganization]);
 
       await expect(service.register(registerDto)).rejects.toThrow(
         InternalServerErrorException,
+      );
+    });
+
+    it('throws ConflictException when the generated organization slug collides', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+      mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
+      mockTx.returning.mockRejectedValueOnce({ code: '23505' });
+
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
       );
     });
   });

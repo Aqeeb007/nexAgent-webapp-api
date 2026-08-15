@@ -2,9 +2,14 @@ import { ConflictException, Inject, Injectable } from '@nestjs/common';
 
 import { eq } from 'drizzle-orm';
 
-import { type Database, DATABASE } from '../database/database.module';
+import {
+  type Database,
+  type Transaction,
+  DATABASE,
+} from '../database/database.module';
 
 import { users } from '../database/schema/users';
+import { isUniqueConstraintViolation } from '../common/utils/postgres-error.util';
 
 @Injectable()
 export class UsersService {
@@ -17,7 +22,7 @@ export class UsersService {
     const result = await this.db
       .select()
       .from(users)
-      .where(eq(users.email, email))
+      .where(eq(users.email, email.toLowerCase()))
       .limit(1);
 
     return result[0] ?? null;
@@ -33,34 +38,41 @@ export class UsersService {
     return result[0] ?? null;
   }
 
-  async createUser(data: {
-    email: string;
-    passwordHash: string;
-    firstName: string;
-    lastName: string;
-  }) {
-    const existingUser = await this.findByEmail(data.email);
+  async createUser(
+    data: {
+      email: string;
+      passwordHash: string;
+      firstName: string;
+      lastName: string;
+    },
+    tx?: Transaction,
+  ) {
+    const executor = tx ?? this.db;
 
-    if (existingUser) {
-      throw new ConflictException('Email already registered');
+    try {
+      const result = await executor
+        .insert(users)
+        .values({
+          email: data.email.toLowerCase(),
+          passwordHash: data.passwordHash,
+          firstName: data.firstName,
+          lastName: data.lastName,
+        })
+        .returning({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          emailVerified: users.emailVerified,
+        });
+
+      return result[0];
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) {
+        throw new ConflictException('Email already registered');
+      }
+
+      throw error;
     }
-
-    const result = await this.db
-      .insert(users)
-      .values({
-        email: data.email,
-        passwordHash: data.passwordHash,
-        firstName: data.firstName,
-        lastName: data.lastName,
-      })
-      .returning({
-        id: users.id,
-        email: users.email,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        emailVerified: users.emailVerified,
-      });
-
-    return result[0];
   }
 }

@@ -6,6 +6,8 @@ export const DATABASE = 'DATABASE';
 
 export type Database = ReturnType<typeof drizzle>;
 
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
 @Global()
 @Module({
   providers: [

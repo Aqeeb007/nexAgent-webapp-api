@@ -4,72 +4,67 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { type Database, DATABASE } from '../database/database.module';
-import { users } from '../database/schema/users';
 import { eq } from 'drizzle-orm';
 import { organizations } from '../database/schema/organizations';
 import { roles } from '../database/schema/roles';
 import { organizationMembers } from '../database/schema/organization-members';
+import { UsersService } from '../users/users.service';
+import { isUniqueConstraintViolation } from '../common/utils/postgres-error.util';
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(DATABASE)
     private readonly db: Database,
+    private readonly usersService: UsersService,
   ) {}
   async register(dto: RegisterDto) {
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
     const result = await this.db.transaction(async (tx) => {
-      // 1. Check email
-      const existingUser = await tx
-        .select({
-          id: users.id,
-        })
-        .from(users)
-        .where(eq(users.email, dto.email.toLowerCase()))
-        .limit(1);
-
-      if (existingUser.length > 0) {
-        throw new ConflictException('Email already registered');
-      }
-
-      // 2. Create user
-      const [user] = await tx
-        .insert(users)
-        .values({
-          email: dto.email.toLowerCase(),
+      // 1. Create user (DB unique constraint on email is the source of truth;
+      // usersService.createUser turns a conflicting insert into a ConflictException)
+      const user = await this.usersService.createUser(
+        {
+          email: dto.email,
           passwordHash,
           firstName: dto.firstName,
           lastName: dto.lastName,
-        })
-        .returning({
-          id: users.id,
-          email: users.email,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          emailVerified: users.emailVerified,
-        });
+        },
+        tx,
+      );
 
-      // 3. Create organization
+      // 2. Create organization
       const slug = this.createOrganizationSlug(dto.firstName);
 
-      const [organization] = await tx
-        .insert(organizations)
-        .values({
-          name: `${dto.firstName}'s Organization`,
-          slug,
-        })
-        .returning({
-          id: organizations.id,
-          name: organizations.name,
-          slug: organizations.slug,
-        });
+      let organization: { id: string; name: string; slug: string };
+      try {
+        [organization] = await tx
+          .insert(organizations)
+          .values({
+            name: `${dto.firstName}'s Organization`,
+            slug,
+          })
+          .returning({
+            id: organizations.id,
+            name: organizations.name,
+            slug: organizations.slug,
+          });
+      } catch (error) {
+        if (isUniqueConstraintViolation(error)) {
+          throw new ConflictException(
+            'Could not create organization, please try again',
+          );
+        }
 
-      // 4. Find owner role
+        throw error;
+      }
+
+      // 3. Find owner role
       const [ownerRole] = await tx
         .select({
           id: roles.id,
@@ -82,7 +77,7 @@ export class AuthService {
         throw new InternalServerErrorException('Owner role is not configured');
       }
 
-      // 5. Create membership
+      // 4. Create membership
       await tx.insert(organizationMembers).values({
         userId: user.id,
         organizationId: organization.id,
@@ -98,28 +93,12 @@ export class AuthService {
     return result;
   }
 
-  findAll() {
-    return `This action returns all auth`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
-  }
-
-  update(id: number, loginDto: LoginDto) {
-    return `This action updates a #${id} auth`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
-  }
-
   private createOrganizationSlug(firstName: string): string {
     const normalized = firstName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
-    return `${normalized}-${crypto.randomUUID().slice(0, 8)}`;
+    return `${normalized}-${randomUUID().slice(0, 8)}`;
   }
 }
