@@ -1,15 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  ConflictException,
-  InternalServerErrorException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { DATABASE } from '../database/database.module';
 import { UsersService } from '../users/users.service';
 import { TokenService } from './token.service';
 import { RefreshTokensService } from './refresh-tokens.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 
 jest.mock('bcrypt');
 
@@ -48,6 +45,7 @@ describe('AuthService', () => {
     findValidByHash: jest.Mock;
     revokeByHash: jest.Mock;
   };
+  let mockOrganizationsService: { createOwned: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -81,6 +79,9 @@ describe('AuthService', () => {
       findValidByHash: jest.fn(),
       revokeByHash: jest.fn(),
     };
+    mockOrganizationsService = {
+      createOwned: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -89,6 +90,7 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: mockUsersService },
         { provide: TokenService, useValue: mockTokenService },
         { provide: RefreshTokensService, useValue: mockRefreshTokensService },
+        { provide: OrganizationsService, useValue: mockOrganizationsService },
       ],
     }).compile();
 
@@ -117,15 +119,15 @@ describe('AuthService', () => {
     const insertedOrganization = {
       id: 'org-1',
       name: "Jane's Organization",
-      slug: 'jane-abcd1234',
+      slug: 'janes-organization-abcd1234',
     };
-    const ownerRole = { id: 'role-owner' };
 
-    it('creates the user, their organization, and an owner membership', async () => {
+    it('creates the user and their owned organization inside one transaction', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
       mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
-      mockTx.limit.mockResolvedValueOnce([ownerRole]); // select+limit: the "owner" role lookup
-      mockTx.returning.mockResolvedValueOnce([insertedOrganization]); // insert+returning: the new org row
+      mockOrganizationsService.createOwned.mockResolvedValueOnce(
+        insertedOrganization,
+      );
 
       const result = await service.register(registerDto);
 
@@ -140,12 +142,13 @@ describe('AuthService', () => {
         mockTx,
       );
 
-      // The membership ties the new user to the new org via the owner role
-      expect(mockTx.values).toHaveBeenCalledWith({
-        userId: insertedUser.id,
-        organizationId: insertedOrganization.id,
-        roleId: ownerRole.id,
-      });
+      // Org creation + owner-role assignment is delegated to
+      // OrganizationsService.createOwned, sharing the same transaction
+      expect(mockOrganizationsService.createOwned).toHaveBeenCalledWith(
+        `${registerDto.firstName}'s Organization`,
+        insertedUser.id,
+        mockTx,
+      );
 
       expect(result).toEqual({
         user: insertedUser,
@@ -161,24 +164,17 @@ describe('AuthService', () => {
       await expect(service.register(registerDto)).rejects.toThrow(
         ConflictException,
       );
-      expect(mockTx.insert).not.toHaveBeenCalled();
+      expect(mockOrganizationsService.createOwned).not.toHaveBeenCalled();
     });
 
-    it('throws InternalServerErrorException when the "owner" role is not seeded', async () => {
+    it('propagates errors from organization creation', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
       mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
-      mockTx.limit.mockResolvedValueOnce([]); // owner role missing
-      mockTx.returning.mockResolvedValueOnce([insertedOrganization]);
-
-      await expect(service.register(registerDto)).rejects.toThrow(
-        InternalServerErrorException,
+      mockOrganizationsService.createOwned.mockRejectedValueOnce(
+        new ConflictException(
+          'Could not create organization, please try again',
+        ),
       );
-    });
-
-    it('throws ConflictException when the generated organization slug collides', async () => {
-      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-      mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
-      mockTx.returning.mockRejectedValueOnce({ code: '23505' });
 
       await expect(service.register(registerDto)).rejects.toThrow(
         ConflictException,

@@ -9,10 +9,12 @@ import { TokenService } from './token.service';
 import { RefreshTokensService } from './refresh-tokens.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 
 @Module({
   imports: [
     UsersModule,
+    OrganizationsModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
