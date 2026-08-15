@@ -5,13 +5,10 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
-
-const trim = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.trim() : value;
+import { Trim } from '../../common/decorators/trim.decorator';
 
 export class RegisterDto {
-  @Transform(trim)
+  @Trim()
   @IsEmail()
   @MaxLength(255)
   email!: string;
@@ -22,13 +19,13 @@ export class RegisterDto {
   @MaxLength(72) // bcrypt only hashes the first 72 bytes
   password!: string;
 
-  @Transform(trim)
+  @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
   firstName!: string;
 
-  @Transform(trim)
+  @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)

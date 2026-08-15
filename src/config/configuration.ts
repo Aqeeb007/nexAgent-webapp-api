@@ -3,5 +3,13 @@ export default () => ({
   database: {
     host: process.env.DATABASE_HOST,
     port: parseInt(process.env.DATABASE_PORT!, 10) || 5432,
+    url: process.env.DATABASE_URL,
   },
+  jwt: {
+    accessSecret: process.env.JWT_ACCESS_SECRET,
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
+  },
+  testUserId: process.env.TEST_USER_ID,
 });

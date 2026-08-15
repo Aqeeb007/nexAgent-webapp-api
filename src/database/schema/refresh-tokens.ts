@@ -13,7 +13,9 @@ export const refreshTokens = pgTable('refresh_tokens', {
 
   tokenHash: varchar('token_hash', {
     length: 255,
-  }).notNull(),
+  })
+    .notNull()
+    .unique(),
 
   expiresAt: timestamp('expires_at').notNull(),
 

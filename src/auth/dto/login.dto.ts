@@ -1,10 +1,15 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { Trim } from '../../common/decorators/trim.decorator';
 
 export class LoginDto {
+  @Trim()
   @IsEmail()
-  email: string;
+  @MaxLength(255)
+  email!: string;
 
+  // Not trimmed: leading/trailing spaces may be intentional as part of the secret.
   @IsString()
   @MinLength(8)
-  password: string;
+  @MaxLength(72) // bcrypt only hashes the first 72 bytes
+  password!: string;
 }

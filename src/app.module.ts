@@ -15,15 +15,19 @@ import * as Joi from 'joi';
       load: [configuration],
       isGlobal: true,
       validationSchema: Joi.object({
+        PORT: Joi.number().default(3000),
+
+        DATABASE_HOST: Joi.string().optional(),
+        DATABASE_PORT: Joi.number().default(5432),
         DATABASE_URL: Joi.string().required(),
 
         JWT_ACCESS_SECRET: Joi.string().min(32).required(),
-
         JWT_ACCESS_EXPIRES_IN: Joi.string().required(),
 
         JWT_REFRESH_SECRET: Joi.string().min(32).required(),
-
         JWT_REFRESH_EXPIRES_IN: Joi.string().required(),
+
+        TEST_USER_ID: Joi.string().uuid().optional(),
       }),
     }),
     DatabaseModule,
