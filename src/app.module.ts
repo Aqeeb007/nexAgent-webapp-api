@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
 import { RbacModule } from './rbac/rbac.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { RbacModule } from './rbac/rbac.module';
     }),
     DatabaseModule,
     RbacModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
