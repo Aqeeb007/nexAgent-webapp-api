@@ -11,5 +11,4 @@ export default () => ({
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
   },
-  testUserId: process.env.TEST_USER_ID,
 });
