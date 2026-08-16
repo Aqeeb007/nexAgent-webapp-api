@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { UsersModule } from './users/users.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { AgentsModule } from './agents/agents.module';
 import * as Joi from 'joi';
 
 @Module({
@@ -36,6 +37,7 @@ import * as Joi from 'joi';
     AuthModule,
     UsersModule,
     OrganizationsModule,
+    AgentsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
