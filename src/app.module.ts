@@ -13,6 +13,8 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { AgentsModule } from './agents/agents.module';
 import { ToolsModule } from './tools/tools.module';
 import { AgentToolsModule } from './agent-tools/agent-tools.module';
+import { OpenAiModule } from './openai/openai.module';
+import { ChatModule } from './chat/chat.module';
 import * as Joi from 'joi';
 
 @Module({
@@ -32,6 +34,8 @@ import * as Joi from 'joi';
 
         JWT_REFRESH_SECRET: Joi.string().min(32).required(),
         JWT_REFRESH_EXPIRES_IN: Joi.string().required(),
+
+        OPENAI_API_KEY: Joi.string().required(),
       }),
     }),
     DatabaseModule,
@@ -42,6 +46,8 @@ import * as Joi from 'joi';
     AgentsModule,
     ToolsModule,
     AgentToolsModule,
+    OpenAiModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: JwtAuthGuard }],

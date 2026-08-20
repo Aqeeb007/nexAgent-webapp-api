@@ -97,6 +97,37 @@ export class AgentToolsService {
       );
   }
 
+  // Internal use only (ChatService) — full tool rows including config and
+  // the LLM-facing description/parameters, unlike the curated public
+  // list() above. Chat-time access to this is separately gated on
+  // TOOL_EXECUTE by the caller (see ChatService), not by what this method
+  // exposes, so returning full rows here is fine.
+  async listFull(agentId: string, organizationId: string) {
+    const agent = await this.agentsService.findOne(agentId, organizationId);
+
+    if (!agent) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    return this.db
+      .select({
+        id: tools.id,
+        name: tools.name,
+        type: tools.type,
+        config: tools.config,
+        description: tools.description,
+        parameters: tools.parameters,
+      })
+      .from(agentTools)
+      .innerJoin(tools, eq(agentTools.toolId, tools.id))
+      .where(
+        and(
+          eq(agentTools.agentId, agentId),
+          eq(agentTools.organizationId, organizationId),
+        ),
+      );
+  }
+
   async detach(agentId: string, toolId: string, organizationId: string) {
     const result = await this.db
       .delete(agentTools)

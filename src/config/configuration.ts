@@ -11,4 +11,7 @@ export default () => ({
     refreshSecret: process.env.JWT_REFRESH_SECRET,
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
   },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+  },
 });

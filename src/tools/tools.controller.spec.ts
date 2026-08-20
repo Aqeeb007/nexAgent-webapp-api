@@ -61,6 +61,7 @@ describe('ToolsController', () => {
         name: 'Weather API',
         type: 'http' as const,
         config: { url: 'https://example.com/weather', method: 'GET' as const },
+        description: 'Gets the current weather for a city',
       };
 
       const result = await controller.create(organizationId, dto);

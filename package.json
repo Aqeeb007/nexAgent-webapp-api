@@ -37,6 +37,7 @@
     "class-validator": "^0.15.1",
     "drizzle-orm": "1.0.0-rc.4",
     "joi": "^18.2.3",
+    "openai": "^7.5.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.23.0",

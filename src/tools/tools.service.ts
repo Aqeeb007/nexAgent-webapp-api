@@ -13,6 +13,8 @@ export interface ToolInput {
   name: string;
   type: string;
   config: Record<string, unknown>;
+  description: string;
+  parameters?: Record<string, unknown>;
 }
 
 interface HttpToolConfig {
@@ -34,6 +36,8 @@ const TOOL_COLUMNS = {
   name: tools.name,
   type: tools.type,
   config: tools.config,
+  description: tools.description,
+  parameters: tools.parameters,
   createdAt: tools.createdAt,
   updatedAt: tools.updatedAt,
 };
@@ -92,6 +96,8 @@ export class ToolsService {
         name: data.name,
         type: data.type,
         config: data.config,
+        description: data.description,
+        parameters: data.parameters,
       })
       .returning(TOOL_COLUMNS);
 

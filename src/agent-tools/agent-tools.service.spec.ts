@@ -135,6 +135,37 @@ describe('AgentToolsService', () => {
     });
   });
 
+  describe('listFull', () => {
+    it('returns full tool rows when the agent is in the org', async () => {
+      mockAgentsService.findOne.mockResolvedValueOnce(agent);
+      const rows = [
+        {
+          id: 'tool-1',
+          name: 'Weather API',
+          type: 'http',
+          config: { url: 'https://example.com', method: 'GET' },
+          description: 'Gets weather',
+          parameters: { type: 'object', properties: {} },
+        },
+      ];
+      mockDb.where.mockResolvedValueOnce(rows);
+
+      const result = await service.listFull('agent-1', organizationId);
+
+      expect(mockDb.innerJoin).toHaveBeenCalled();
+      expect(result).toEqual(rows);
+    });
+
+    it('throws NotFoundException when the agent is not in the org', async () => {
+      mockAgentsService.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.listFull('agent-1', organizationId)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockDb.select).not.toHaveBeenCalled();
+    });
+  });
+
   describe('detach', () => {
     it('deletes and returns the id when the attachment exists', async () => {
       mockDb.returning.mockResolvedValueOnce([{ id: 'at-1' }]);

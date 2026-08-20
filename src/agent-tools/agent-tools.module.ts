@@ -13,5 +13,7 @@ import { ToolsModule } from '../tools/tools.module';
   controllers: [AgentToolsController],
 
   providers: [AgentToolsService],
+
+  exports: [AgentToolsService],
 })
 export class AgentToolsModule {}

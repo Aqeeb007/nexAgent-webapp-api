@@ -65,6 +65,7 @@ describe('ToolsService', () => {
         name: 'Weather API',
         type: 'http',
         config: { url: 'https://example.com/weather', method: 'GET' },
+        description: 'Gets the current weather for a city',
       });
 
       expect(mockDb.insert).toHaveBeenCalled();
