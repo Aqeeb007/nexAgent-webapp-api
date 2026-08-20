@@ -16,6 +16,12 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.AGENT_UPDATE,
     PERMISSIONS.AGENT_DELETE,
 
+    PERMISSIONS.TOOL_CREATE,
+    PERMISSIONS.TOOL_READ,
+    PERMISSIONS.TOOL_UPDATE,
+    PERMISSIONS.TOOL_DELETE,
+    PERMISSIONS.TOOL_EXECUTE,
+
     PERMISSIONS.WORKFLOW_CREATE,
     PERMISSIONS.WORKFLOW_READ,
     PERMISSIONS.WORKFLOW_UPDATE,
@@ -33,6 +39,11 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.AGENT_READ,
     PERMISSIONS.AGENT_UPDATE,
 
+    PERMISSIONS.TOOL_CREATE,
+    PERMISSIONS.TOOL_READ,
+    PERMISSIONS.TOOL_UPDATE,
+    PERMISSIONS.TOOL_EXECUTE,
+
     PERMISSIONS.WORKFLOW_CREATE,
     PERMISSIONS.WORKFLOW_READ,
     PERMISSIONS.WORKFLOW_UPDATE,
@@ -45,6 +56,11 @@ export const ROLE_PERMISSIONS = {
 
     PERMISSIONS.AGENT_CREATE,
     PERMISSIONS.AGENT_READ,
+
+    // No TOOL_* grants for members — tool config can hold real secrets
+    // (e.g. an API key in `config.headers`), and GET /tools/:id returns
+    // that config in full with no masking. Restricting to admin+owner is
+    // the deliberate MVP posture; see the Phase 3 plan for the reasoning.
 
     PERMISSIONS.WORKFLOW_CREATE,
     PERMISSIONS.WORKFLOW_READ,

@@ -12,6 +12,12 @@ export const PERMISSIONS = {
   AGENT_UPDATE: 'agent:update',
   AGENT_DELETE: 'agent:delete',
 
+  TOOL_CREATE: 'tool:create',
+  TOOL_READ: 'tool:read',
+  TOOL_UPDATE: 'tool:update',
+  TOOL_DELETE: 'tool:delete',
+  TOOL_EXECUTE: 'tool:execute',
+
   WORKFLOW_CREATE: 'workflow:create',
   WORKFLOW_READ: 'workflow:read',
   WORKFLOW_UPDATE: 'workflow:update',
