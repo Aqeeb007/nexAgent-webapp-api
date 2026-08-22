@@ -17,6 +17,12 @@ async function bootstrap() {
       transform: true,
     }),
   );
+  app.enableCors({
+    origin: configService.get<string>('corsOrigin')?.split(','),
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+  });
+
   await app.listen(configService.get<number>('port') ?? 3000);
 }
 bootstrap();
