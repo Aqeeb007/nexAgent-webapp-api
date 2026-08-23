@@ -16,11 +16,47 @@ export const openAiClientProvider = {
   inject: [ConfigService],
 };
 
+// The fields an agent is allowed to configure. Kept in sync with
+// AgentConfigurationDto, which is what actually validates and shapes this
+// data on the way into the database — this is just the read-side mirror.
+export interface AgentConfiguration {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+}
+
 interface CreateChatCompletionInput {
   model: string;
   messages: ChatCompletionMessageParam[];
   tools?: ChatCompletionTool[];
-  configuration?: Record<string, unknown>;
+  configuration?: AgentConfiguration;
+}
+
+// The rest of this API is camelCase, but OpenAI's own params are
+// snake_case (max_tokens, top_p, ...). This is an explicit whitelist, not a
+// spread: only fields AgentConfigurationDto actually validated are ever
+// forwarded, so no stray/legacy key can reach OpenAI as a surprise 400.
+function toOpenAiParams(
+  configuration?: AgentConfiguration,
+): Record<string, unknown> {
+  if (!configuration) {
+    return {};
+  }
+
+  const { temperature, maxTokens, topP, frequencyPenalty, presencePenalty } =
+    configuration;
+  const params: Record<string, unknown> = {};
+
+  if (temperature !== undefined) params.temperature = temperature;
+  if (maxTokens !== undefined) params.max_tokens = maxTokens;
+  if (topP !== undefined) params.top_p = topP;
+  if (frequencyPenalty !== undefined)
+    params.frequency_penalty = frequencyPenalty;
+  if (presencePenalty !== undefined) params.presence_penalty = presencePenalty;
+
+  return params;
 }
 
 @Injectable()
@@ -37,10 +73,7 @@ export class OpenAiService {
       model,
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
-      // Unvalidated jsonb (temperature, max_tokens, etc.) — a garbage value
-      // here is just another OpenAI API error, caught by the same generic
-      // handling as an invalid model string.
-      ...(configuration ?? {}),
+      ...toOpenAiParams(configuration),
     });
 
     return completion.choices[0].message;

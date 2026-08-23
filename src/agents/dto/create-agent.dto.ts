@@ -1,11 +1,14 @@
 import {
   IsNotEmpty,
-  IsObject,
   IsOptional,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
 import { Trim } from '../../common/decorators/trim.decorator';
+import { AgentConfigurationDto } from './agent-configuration.dto';
 
 export class CreateAgentDto {
   @Trim()
@@ -31,6 +34,7 @@ export class CreateAgentDto {
   model!: string;
 
   @IsOptional()
-  @IsObject()
-  configuration?: Record<string, unknown>;
+  @ValidateNested()
+  @Type(() => AgentConfigurationDto)
+  configuration?: AgentConfigurationDto;
 }

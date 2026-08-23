@@ -8,7 +8,7 @@ import {
 } from '../database/database.module';
 import { agents } from '../database/schema/agents';
 
-interface AgentInput {
+export interface AgentInput {
   name: string;
   description?: string;
   systemPrompt: string;

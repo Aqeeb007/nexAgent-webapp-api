@@ -1,9 +1,4 @@
-import {
-  pgTable,
-  timestamp,
-  uuid,
-  unique,
-} from 'drizzle-orm/pg-core';
+import { pgTable, timestamp, uuid, unique } from 'drizzle-orm/pg-core';
 
 import { users } from './users';
 import { organizations } from './organizations';
@@ -30,14 +25,9 @@ export const organizationMembers = pgTable(
       .notNull()
       .references(() => roles.id),
 
-    createdAt: timestamp('created_at')
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    unique('user_organization_unique').on(
-      table.userId,
-      table.organizationId,
-    ),
+    unique('user_organization_unique').on(table.userId, table.organizationId),
   ],
 );

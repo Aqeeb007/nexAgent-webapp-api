@@ -11,7 +11,10 @@ import type {
 import { AgentsService } from '../agents/agents.service';
 import { AgentToolsService } from '../agent-tools/agent-tools.service';
 import { ToolsService } from '../tools/tools.service';
-import { OpenAiService } from '../openai/openai.service';
+import {
+  OpenAiService,
+  type AgentConfiguration,
+} from '../openai/openai.service';
 import { RbacService } from '../rbac/rbac.service';
 import { PERMISSIONS } from '../rbac/constants/permissions';
 
@@ -46,6 +49,9 @@ function toOpenAiToolDef(
   return {
     type: 'function',
     function: {
+      // Trusted to match ^[a-zA-Z0-9_-]+$ — enforced by CreateToolDto's
+      // @Matches on `name`, since this is what OpenAI requires as a
+      // function name and there's no separate display name.
       name: tool.name,
       description: tool.description || tool.name,
       parameters: tool.parameters,
@@ -138,7 +144,11 @@ export class ChatService {
             ...toOpenAiMessages(history),
           ],
           tools: toolDefs,
-          configuration: agent.configuration ?? undefined,
+          // Trusted to match AgentConfigurationDto's shape — configuration
+          // is only ever written through CreateAgentDto/UpdateAgentDto's
+          // nested validation.
+          configuration:
+            (agent.configuration as AgentConfiguration | null) ?? undefined,
         });
       } catch (error) {
         throw new BadGatewayException(

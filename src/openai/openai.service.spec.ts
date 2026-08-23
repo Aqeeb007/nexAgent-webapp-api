@@ -1,9 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OpenAiService, OPENAI_CLIENT } from './openai.service';
+import {
+  OpenAiService,
+  OPENAI_CLIENT,
+  type AgentConfiguration,
+} from './openai.service';
 
 interface CreateParamsCallArg {
   tools?: unknown[];
   temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  seed?: number;
 }
 
 describe('OpenAiService', () => {
@@ -84,7 +93,7 @@ describe('OpenAiService', () => {
     expect(call.tools).toEqual(tools);
   });
 
-  it('spreads agent configuration (e.g. temperature) into the request', async () => {
+  it('maps every known configuration field to its OpenAI param name', async () => {
     mockClient.chat.completions.create.mockResolvedValueOnce({
       choices: [{ message: { role: 'assistant', content: 'ok' } }],
     });
@@ -92,12 +101,42 @@ describe('OpenAiService', () => {
     await service.createChatCompletion({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: 'hi' }],
-      configuration: { temperature: 0.2 },
+      configuration: {
+        temperature: 0.7,
+        maxTokens: 1024,
+        topP: 0.9,
+        frequencyPenalty: 0.5,
+        presencePenalty: -0.5,
+      },
     });
 
     const [call] = mockClient.chat.completions.create.mock.calls[0] as [
       CreateParamsCallArg,
     ];
-    expect(call.temperature).toBe(0.2);
+    expect(call.temperature).toBe(0.7);
+    expect(call.max_tokens).toBe(1024);
+    expect(call.top_p).toBe(0.9);
+    expect(call.frequency_penalty).toBe(0.5);
+    expect(call.presence_penalty).toBe(-0.5);
+  });
+
+  it('only forwards known configuration fields, dropping anything unrecognized', async () => {
+    mockClient.chat.completions.create.mockResolvedValueOnce({
+      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+    });
+
+    await service.createChatCompletion({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      // Simulates a row written before configuration was validated —
+      // OpenAiService must not forward it to OpenAI verbatim.
+      configuration: { temperature: 0.5, seed: 42 } as AgentConfiguration,
+    });
+
+    const [call] = mockClient.chat.completions.create.mock.calls[0] as [
+      CreateParamsCallArg,
+    ];
+    expect(call.temperature).toBe(0.5);
+    expect(call.seed).toBeUndefined();
   });
 });

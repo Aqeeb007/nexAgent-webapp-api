@@ -13,7 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 
-import { AgentsService } from './agents.service';
+import { AgentsService, type AgentInput } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 
@@ -34,7 +34,12 @@ export class AgentsController {
     @OrganizationId() organizationId: string,
     @Body() dto: CreateAgentDto,
   ) {
-    return this.agentsService.create(organizationId, dto);
+    // Validated by CreateAgentDto's nested AgentConfigurationDto —
+    // AgentsService stores configuration as opaque jsonb.
+    return this.agentsService.create(
+      organizationId,
+      dto as unknown as AgentInput,
+    );
   }
 
   @Get()
@@ -65,7 +70,11 @@ export class AgentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAgentDto,
   ) {
-    const agent = await this.agentsService.update(id, organizationId, dto);
+    const agent = await this.agentsService.update(
+      id,
+      organizationId,
+      dto as unknown as Partial<AgentInput>,
+    );
 
     if (!agent) {
       throw new NotFoundException('Agent not found');
