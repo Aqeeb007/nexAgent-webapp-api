@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import { ChatController } from './chat.controller';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { RbacService } from '../rbac/rbac.service';
 
@@ -13,6 +14,7 @@ describe('ChatController', () => {
     getMessages: jest.Mock;
     deleteConversation: jest.Mock;
   };
+  let chatGateway: { emitStep: jest.Mock };
 
   const organizationId = 'org-1';
   const agentId = 'agent-1';
@@ -27,11 +29,13 @@ describe('ChatController', () => {
       getMessages: jest.fn(),
       deleteConversation: jest.fn(),
     };
+    chatGateway = { emitStep: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ChatController],
       providers: [
         { provide: ChatService, useValue: chatService },
+        { provide: ChatGateway, useValue: chatGateway },
         // @UseGuards(PermissionGuard) at the class level makes Nest
         // instantiate PermissionGuard while compiling this module, even
         // though these tests call controller methods directly.
@@ -106,8 +110,37 @@ describe('ChatController', () => {
         organizationId,
         user.id,
         'hello',
+        expect.any(Function),
       );
       expect(result).toEqual(response);
+    });
+
+    it('wires the onStep callback to ChatGateway.emitStep for this conversation', async () => {
+      chatService.sendMessage.mockResolvedValue({
+        conversationId,
+        message: 'hi',
+      });
+
+      await controller.sendMessage(
+        organizationId,
+        agentId,
+        conversationId,
+        user,
+        { message: 'hello' },
+      );
+
+      const [, , , , , onStep] = chatService.sendMessage.mock.calls[0] as [
+        string,
+        string,
+        string,
+        string,
+        string,
+        (event: unknown) => void,
+      ];
+      const event = { type: 'thinking' };
+      onStep(event);
+
+      expect(chatGateway.emitStep).toHaveBeenCalledWith(conversationId, event);
     });
   });
 

@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 
@@ -25,7 +26,10 @@ import type { AuthenticatedUser } from '../common/types/express';
 @Controller('agents/:agentId/conversations')
 @UseGuards(PermissionGuard)
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   @Post()
   @RequirePermission(PERMISSIONS.AGENT_READ)
@@ -66,6 +70,7 @@ export class ChatController {
       organizationId,
       user.id,
       dto.message,
+      (event) => this.chatGateway.emitStep(conversationId, event),
     );
   }
 

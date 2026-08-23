@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 
 import { ChatController } from './chat.controller';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { ConversationsService } from './conversations.service';
 
@@ -17,10 +20,21 @@ import { OpenAiModule } from '../openai/openai.module';
     AgentToolsModule,
     ToolsModule,
     OpenAiModule,
+    // Registered locally (mirrors AuthModule's own JwtModule.registerAsync)
+    // rather than importing AuthModule, which would pull in
+    // UsersModule/OrganizationsModule as an unwanted transitive dependency
+    // just to verify a token's signature on the gateway's handshake.
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService): JwtModuleOptions => ({
+        secret: configService.get<string>('jwt.accessSecret'),
+      }),
+    }),
   ],
 
   controllers: [ChatController],
 
-  providers: [ChatService, ConversationsService],
+  providers: [ChatService, ConversationsService, ChatGateway],
 })
 export class ChatModule {}
