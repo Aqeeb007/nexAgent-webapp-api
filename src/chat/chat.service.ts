@@ -70,8 +70,37 @@ export class ChatService {
     private readonly rbacService: RbacService,
   ) {}
 
+  async createConversation(
+    agentId: string,
+    organizationId: string,
+    userId: string,
+  ) {
+    const agent = await this.agentsService.findOne(agentId, organizationId);
+
+    if (!agent) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    return this.conversationsService.create(agentId, userId);
+  }
+
+  async listConversations(
+    agentId: string,
+    organizationId: string,
+    userId: string,
+  ) {
+    const agent = await this.agentsService.findOne(agentId, organizationId);
+
+    if (!agent) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    return this.conversationsService.listForUser(agentId, userId);
+  }
+
   async sendMessage(
     agentId: string,
+    conversationId: string,
     organizationId: string,
     userId: string,
     userMessage: string,
@@ -83,10 +112,15 @@ export class ChatService {
       throw new NotFoundException('Agent not found');
     }
 
-    const conversation = await this.conversationsService.findOrCreate(
+    const conversation = await this.conversationsService.findOwned(
+      conversationId,
       agentId,
       userId,
     );
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
 
     // Persisted before any OpenAI call so it's never lost if everything
     // downstream fails.
@@ -229,29 +263,9 @@ export class ChatService {
     return { conversationId: conversation.id, message: finalMessage.content };
   }
 
-  async getHistory(agentId: string, organizationId: string, userId: string) {
-    const agent = await this.agentsService.findOne(agentId, organizationId);
-
-    if (!agent) {
-      throw new NotFoundException('Agent not found');
-    }
-
-    const conversation = await this.conversationsService.findForUser(
-      agentId,
-      userId,
-    );
-
-    if (!conversation) {
-      return { conversationId: null, messages: [] };
-    }
-
-    const messages = await this.conversationsService.loadAll(conversation.id);
-
-    return { conversationId: conversation.id, messages };
-  }
-
-  async resetConversation(
+  async getMessages(
     agentId: string,
+    conversationId: string,
     organizationId: string,
     userId: string,
   ) {
@@ -261,10 +275,41 @@ export class ChatService {
       throw new NotFoundException('Agent not found');
     }
 
-    const removed = await this.conversationsService.remove(agentId, userId);
+    const conversation = await this.conversationsService.findOwned(
+      conversationId,
+      agentId,
+      userId,
+    );
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const messages = await this.conversationsService.loadAll(conversation.id);
+
+    return { conversationId: conversation.id, messages };
+  }
+
+  async deleteConversation(
+    agentId: string,
+    conversationId: string,
+    organizationId: string,
+    userId: string,
+  ) {
+    const agent = await this.agentsService.findOne(agentId, organizationId);
+
+    if (!agent) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    const removed = await this.conversationsService.remove(
+      conversationId,
+      agentId,
+      userId,
+    );
 
     if (!removed) {
-      throw new NotFoundException('No conversation to reset');
+      throw new NotFoundException('Conversation not found');
     }
   }
 }

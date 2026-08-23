@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
@@ -29,6 +29,7 @@ const MESSAGE_COLUMNS = {
 type MessageRow = typeof messages.$inferSelect;
 
 const DEFAULT_MAX_TURNS = 20;
+const PREVIEW_LENGTH = 100;
 
 export interface AssistantToolCallData {
   toolCalls: ChatCompletionMessageToolCall[];
@@ -41,43 +42,42 @@ export interface ToolResultData {
   result: unknown;
 }
 
+export interface ConversationListItem {
+  id: string;
+  agentId: string;
+  userId: string;
+  createdAt: Date;
+  preview: string | null;
+  lastMessageAt: Date | null;
+}
+
 @Injectable()
 export class ConversationsService {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  // Race-safe find-or-create against the (agentId, userId) unique
-  // constraint — a double-submit doesn't create two conversation rows.
-  async findOrCreate(agentId: string, userId: string) {
-    const [inserted] = await this.db
+  // Multiple threads per (agent, user) are allowed — this always inserts a
+  // new row. A double-submit legitimately creates two threads now that
+  // there's no longer a single-conversation invariant to protect (same
+  // posture as AgentsService.create).
+  async create(agentId: string, userId: string) {
+    const [conversation] = await this.db
       .insert(conversations)
       .values({ agentId, userId })
-      .onConflictDoNothing()
       .returning(CONVERSATION_COLUMNS);
 
-    if (inserted) {
-      return inserted;
-    }
-
-    const [existing] = await this.db
-      .select(CONVERSATION_COLUMNS)
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.agentId, agentId),
-          eq(conversations.userId, userId),
-        ),
-      )
-      .limit(1);
-
-    return existing;
+    return conversation;
   }
 
-  async findForUser(agentId: string, userId: string) {
+  // Ownership check for a specific thread: must belong to both this agent
+  // and this user, or the caller gets a 404 (not proof the id exists under
+  // someone else).
+  async findOwned(conversationId: string, agentId: string, userId: string) {
     const result = await this.db
       .select(CONVERSATION_COLUMNS)
       .from(conversations)
       .where(
         and(
+          eq(conversations.id, conversationId),
           eq(conversations.agentId, agentId),
           eq(conversations.userId, userId),
         ),
@@ -87,11 +87,74 @@ export class ConversationsService {
     return result[0] ?? null;
   }
 
-  async remove(agentId: string, userId: string) {
+  // List view: each thread plus a preview (first user message) and
+  // lastMessageAt, computed in app code from a second query rather than a
+  // SQL aggregate — matches loadHistory/loadAll's existing style, fine for
+  // MVP conversation/message volumes.
+  async listForUser(
+    agentId: string,
+    userId: string,
+  ): Promise<ConversationListItem[]> {
+    const threads = await this.db
+      .select(CONVERSATION_COLUMNS)
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.agentId, agentId),
+          eq(conversations.userId, userId),
+        ),
+      )
+      .orderBy(desc(conversations.createdAt));
+
+    if (threads.length === 0) {
+      return [];
+    }
+
+    const threadIds = threads.map((t) => t.id);
+    const allMessages = await this.db
+      .select({
+        conversationId: messages.conversationId,
+        role: messages.role,
+        content: messages.content,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(inArray(messages.conversationId, threadIds))
+      .orderBy(asc(messages.sequence));
+
+    const previews = new Map<string, string>();
+    const lastMessageAts = new Map<string, Date>();
+
+    for (const message of allMessages) {
+      if (message.role === 'user' && !previews.has(message.conversationId)) {
+        previews.set(
+          message.conversationId,
+          message.content.slice(0, PREVIEW_LENGTH),
+        );
+      }
+
+      lastMessageAts.set(message.conversationId, message.createdAt);
+    }
+
+    return threads
+      .map((thread) => ({
+        ...thread,
+        preview: previews.get(thread.id) ?? null,
+        lastMessageAt: lastMessageAts.get(thread.id) ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          (b.lastMessageAt ?? b.createdAt).getTime() -
+          (a.lastMessageAt ?? a.createdAt).getTime(),
+      );
+  }
+
+  async remove(conversationId: string, agentId: string, userId: string) {
     const result = await this.db
       .delete(conversations)
       .where(
         and(
+          eq(conversations.id, conversationId),
           eq(conversations.agentId, agentId),
           eq(conversations.userId, userId),
         ),
@@ -155,7 +218,7 @@ export class ConversationsService {
     return all.slice(startIndex);
   }
 
-  // Full, untrimmed history for display (e.g. GET /agents/:id/chat) — the
+  // Full, untrimmed history for display (e.g. GET .../messages) — the
   // turn-based cap in loadHistory() is an OpenAI-context-budget concern,
   // not a UI concern.
   async loadAll(conversationId: string): Promise<MessageRow[]> {

@@ -17,11 +17,12 @@ describe('ChatService', () => {
   let service: ChatService;
   let agentsService: { findOne: jest.Mock };
   let conversationsService: {
-    findOrCreate: jest.Mock;
+    create: jest.Mock;
+    listForUser: jest.Mock;
+    findOwned: jest.Mock;
     appendMessage: jest.Mock;
     loadHistory: jest.Mock;
     loadAll: jest.Mock;
-    findForUser: jest.Mock;
     remove: jest.Mock;
   };
   let agentToolsService: { listFull: jest.Mock };
@@ -48,7 +49,9 @@ describe('ChatService', () => {
 
     agentsService = { findOne: jest.fn().mockResolvedValue(agent) };
     conversationsService = {
-      findOrCreate: jest.fn().mockResolvedValue(conversation),
+      create: jest.fn().mockResolvedValue(conversation),
+      listForUser: jest.fn().mockResolvedValue([]),
+      findOwned: jest.fn().mockResolvedValue(conversation),
       appendMessage: jest
         .fn()
         .mockImplementation((_id: string, role: string, content: string) => {
@@ -61,7 +64,6 @@ describe('ChatService', () => {
         }),
       loadHistory: jest.fn().mockResolvedValue([]),
       loadAll: jest.fn().mockResolvedValue([]),
-      findForUser: jest.fn(),
       remove: jest.fn(),
     };
     agentToolsService = { listFull: jest.fn().mockResolvedValue([]) };
@@ -84,14 +86,84 @@ describe('ChatService', () => {
     service = module.get<ChatService>(ChatService);
   });
 
+  describe('createConversation', () => {
+    it('throws NotFoundException when the agent is not in the org', async () => {
+      agentsService.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        service.createConversation(agentId, organizationId, userId),
+      ).rejects.toThrow(NotFoundException);
+      expect(conversationsService.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a new conversation for the agent and user', async () => {
+      const result = await service.createConversation(
+        agentId,
+        organizationId,
+        userId,
+      );
+
+      expect(conversationsService.create).toHaveBeenCalledWith(agentId, userId);
+      expect(result).toEqual(conversation);
+    });
+  });
+
+  describe('listConversations', () => {
+    it('throws NotFoundException when the agent is not in the org', async () => {
+      agentsService.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        service.listConversations(agentId, organizationId, userId),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns the threads for this agent and user', async () => {
+      const threads = [{ id: 'conv-1', preview: 'hi', lastMessageAt: null }];
+      conversationsService.listForUser.mockResolvedValueOnce(threads);
+
+      const result = await service.listConversations(
+        agentId,
+        organizationId,
+        userId,
+      );
+
+      expect(conversationsService.listForUser).toHaveBeenCalledWith(
+        agentId,
+        userId,
+      );
+      expect(result).toEqual(threads);
+    });
+  });
+
   describe('sendMessage', () => {
     it('throws NotFoundException when the agent is not in the org', async () => {
       agentsService.findOne.mockResolvedValueOnce(null);
 
       await expect(
-        service.sendMessage(agentId, organizationId, userId, 'hi'),
+        service.sendMessage(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+          'hi',
+        ),
       ).rejects.toThrow(NotFoundException);
-      expect(conversationsService.findOrCreate).not.toHaveBeenCalled();
+      expect(conversationsService.findOwned).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the conversation is not owned by this agent/user', async () => {
+      conversationsService.findOwned.mockResolvedValueOnce(null);
+
+      await expect(
+        service.sendMessage(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+          'hi',
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(conversationsService.appendMessage).not.toHaveBeenCalled();
     });
 
     it('persists the user message before calling OpenAI', async () => {
@@ -100,7 +172,13 @@ describe('ChatService', () => {
         tool_calls: undefined,
       });
 
-      await service.sendMessage(agentId, organizationId, userId, 'hi there');
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi there',
+      );
 
       expect(conversationsService.appendMessage).toHaveBeenNthCalledWith(
         1,
@@ -123,6 +201,7 @@ describe('ChatService', () => {
 
       const result = await service.sendMessage(
         agentId,
+        conversation.id,
         organizationId,
         userId,
         'hi',
@@ -142,7 +221,13 @@ describe('ChatService', () => {
         tool_calls: undefined,
       });
 
-      await service.sendMessage(agentId, organizationId, userId, 'hi');
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
 
       expect(agentToolsService.listFull).not.toHaveBeenCalled();
       const [call] = openAiService.createChatCompletion.mock.calls[0] as [
@@ -176,7 +261,13 @@ describe('ChatService', () => {
         tool_calls: undefined,
       });
 
-      await service.sendMessage(agentId, organizationId, userId, 'hi');
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
 
       const [call] = openAiService.createChatCompletion.mock.calls[0] as [
         CreateChatCompletionCallArg,
@@ -224,6 +315,7 @@ describe('ChatService', () => {
 
       const result = await service.sendMessage(
         agentId,
+        conversation.id,
         organizationId,
         userId,
         'weather?',
@@ -265,6 +357,7 @@ describe('ChatService', () => {
 
       const result = await service.sendMessage(
         agentId,
+        conversation.id,
         organizationId,
         userId,
         'hi',
@@ -304,6 +397,7 @@ describe('ChatService', () => {
 
       const result = await service.sendMessage(
         agentId,
+        conversation.id,
         organizationId,
         userId,
         'go forever',
@@ -319,7 +413,13 @@ describe('ChatService', () => {
       );
 
       await expect(
-        service.sendMessage(agentId, organizationId, userId, 'hi'),
+        service.sendMessage(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+          'hi',
+        ),
       ).rejects.toThrow(BadGatewayException);
 
       expect(conversationsService.appendMessage).toHaveBeenCalledWith(
@@ -330,29 +430,33 @@ describe('ChatService', () => {
     });
   });
 
-  describe('getHistory', () => {
+  describe('getMessages', () => {
     it('throws NotFoundException when the agent is not in the org', async () => {
       agentsService.findOne.mockResolvedValueOnce(null);
 
       await expect(
-        service.getHistory(agentId, organizationId, userId),
+        service.getMessages(agentId, conversation.id, organizationId, userId),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('returns an empty result when no conversation exists yet', async () => {
-      conversationsService.findForUser.mockResolvedValueOnce(null);
+    it('throws NotFoundException when the conversation is not owned by this agent/user', async () => {
+      conversationsService.findOwned.mockResolvedValueOnce(null);
 
-      const result = await service.getHistory(agentId, organizationId, userId);
-
-      expect(result).toEqual({ conversationId: null, messages: [] });
+      await expect(
+        service.getMessages(agentId, conversation.id, organizationId, userId),
+      ).rejects.toThrow(NotFoundException);
       expect(conversationsService.loadAll).not.toHaveBeenCalled();
     });
 
-    it('returns the full history when a conversation exists', async () => {
-      conversationsService.findForUser.mockResolvedValueOnce(conversation);
+    it('returns the full history for the conversation', async () => {
       conversationsService.loadAll.mockResolvedValueOnce([{ id: 'msg-1' }]);
 
-      const result = await service.getHistory(agentId, organizationId, userId);
+      const result = await service.getMessages(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+      );
 
       expect(result).toEqual({
         conversationId: conversation.id,
@@ -361,20 +465,30 @@ describe('ChatService', () => {
     });
   });
 
-  describe('resetConversation', () => {
+  describe('deleteConversation', () => {
     it('throws NotFoundException when the agent is not in the org', async () => {
       agentsService.findOne.mockResolvedValueOnce(null);
 
       await expect(
-        service.resetConversation(agentId, organizationId, userId),
+        service.deleteConversation(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws NotFoundException when there is no conversation to reset', async () => {
+    it('throws NotFoundException when there is no matching conversation to delete', async () => {
       conversationsService.remove.mockResolvedValueOnce(null);
 
       await expect(
-        service.resetConversation(agentId, organizationId, userId),
+        service.deleteConversation(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -384,8 +498,18 @@ describe('ChatService', () => {
       });
 
       await expect(
-        service.resetConversation(agentId, organizationId, userId),
+        service.deleteConversation(
+          agentId,
+          conversation.id,
+          organizationId,
+          userId,
+        ),
       ).resolves.toBeUndefined();
+      expect(conversationsService.remove).toHaveBeenCalledWith(
+        conversation.id,
+        agentId,
+        userId,
+      );
     });
   });
 });

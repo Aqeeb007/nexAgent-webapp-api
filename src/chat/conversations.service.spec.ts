@@ -10,7 +10,6 @@ describe('ConversationsService', () => {
   let mockDb: {
     insert: jest.Mock;
     values: jest.Mock;
-    onConflictDoNothing: jest.Mock;
     returning: jest.Mock;
     select: jest.Mock;
     from: jest.Mock;
@@ -28,7 +27,6 @@ describe('ConversationsService', () => {
     mockDb = {
       insert: jest.fn().mockReturnThis(),
       values: jest.fn().mockReturnThis(),
-      onConflictDoNothing: jest.fn().mockReturnThis(),
       returning: jest.fn(),
       select: jest.fn().mockReturnThis(),
       from: jest.fn().mockReturnThis(),
@@ -52,52 +50,97 @@ describe('ConversationsService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('findOrCreate', () => {
-    it('returns the newly inserted conversation on the happy path', async () => {
+  describe('create', () => {
+    it('always inserts and returns a new conversation (no conflict handling)', async () => {
       mockDb.returning.mockResolvedValueOnce([conversation]);
 
-      const result = await service.findOrCreate(agentId, userId);
+      const result = await service.create(agentId, userId);
 
       expect(mockDb.insert).toHaveBeenCalled();
-      expect(mockDb.onConflictDoNothing).toHaveBeenCalled();
-      expect(result).toEqual(conversation);
-      expect(mockDb.select).not.toHaveBeenCalled();
-    });
-
-    it('falls back to selecting the existing row on a conflict (double-submit race)', async () => {
-      mockDb.returning.mockResolvedValueOnce([]);
-      mockDb.limit.mockResolvedValueOnce([conversation]);
-
-      const result = await service.findOrCreate(agentId, userId);
-
-      expect(mockDb.select).toHaveBeenCalled();
       expect(result).toEqual(conversation);
     });
   });
 
-  describe('findForUser', () => {
-    it('returns the conversation when one exists', async () => {
+  describe('findOwned', () => {
+    it('returns the conversation when it belongs to this agent and user', async () => {
       mockDb.limit.mockResolvedValueOnce([conversation]);
 
-      const result = await service.findForUser(agentId, userId);
+      const result = await service.findOwned(conversation.id, agentId, userId);
 
       expect(result).toEqual(conversation);
     });
 
-    it('returns null when none exists', async () => {
+    it('returns null when no matching row exists', async () => {
       mockDb.limit.mockResolvedValueOnce([]);
 
-      const result = await service.findForUser(agentId, userId);
+      const result = await service.findOwned(conversation.id, agentId, userId);
 
       expect(result).toBeNull();
     });
   });
 
+  describe('listForUser', () => {
+    it('returns an empty list without querying messages when there are no threads', async () => {
+      mockDb.orderBy.mockResolvedValueOnce([]);
+
+      const result = await service.listForUser(agentId, userId);
+
+      expect(result).toEqual([]);
+      expect(mockDb.select).toHaveBeenCalledTimes(1);
+    });
+
+    it('attaches a preview (first user message) and lastMessageAt, sorted by latest activity', async () => {
+      const older = {
+        id: 'conv-older',
+        agentId,
+        userId,
+        createdAt: new Date('2026-01-01'),
+      };
+      const newer = {
+        id: 'conv-newer',
+        agentId,
+        userId,
+        createdAt: new Date('2026-01-02'),
+      };
+      mockDb.orderBy.mockResolvedValueOnce([newer, older]);
+      mockDb.orderBy.mockResolvedValueOnce([
+        {
+          conversationId: older.id,
+          role: 'user',
+          content: 'first message in the older thread',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        },
+        {
+          conversationId: older.id,
+          role: 'assistant',
+          content: 'reply',
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        },
+        {
+          conversationId: newer.id,
+          role: 'user',
+          content: 'first message in the newer thread',
+          createdAt: new Date('2026-01-02T00:00:00Z'),
+        },
+      ]);
+
+      const result = await service.listForUser(agentId, userId);
+
+      // The older thread had the most recent activity (a later reply), so
+      // it sorts first despite conversations being fetched newest-created-first.
+      expect(result.map((c) => c.id)).toEqual([older.id, newer.id]);
+      expect(result[0].preview).toBe('first message in the older thread');
+      expect(result[0].lastMessageAt).toEqual(new Date('2026-01-03T00:00:00Z'));
+      expect(result[1].preview).toBe('first message in the newer thread');
+      expect(result[1].lastMessageAt).toEqual(new Date('2026-01-02T00:00:00Z'));
+    });
+  });
+
   describe('remove', () => {
-    it('deletes and returns the id when found', async () => {
+    it('deletes and returns the id when found and owned', async () => {
       mockDb.returning.mockResolvedValueOnce([{ id: conversation.id }]);
 
-      const result = await service.remove(agentId, userId);
+      const result = await service.remove(conversation.id, agentId, userId);
 
       expect(mockDb.delete).toHaveBeenCalled();
       expect(result).toEqual({ id: conversation.id });
@@ -106,7 +149,7 @@ describe('ConversationsService', () => {
     it('returns null when nothing to delete', async () => {
       mockDb.returning.mockResolvedValueOnce([]);
 
-      const result = await service.remove(agentId, userId);
+      const result = await service.remove(conversation.id, agentId, userId);
 
       expect(result).toBeNull();
     });

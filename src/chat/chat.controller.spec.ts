@@ -7,20 +7,25 @@ import { RbacService } from '../rbac/rbac.service';
 describe('ChatController', () => {
   let controller: ChatController;
   let chatService: {
+    createConversation: jest.Mock;
+    listConversations: jest.Mock;
     sendMessage: jest.Mock;
-    getHistory: jest.Mock;
-    resetConversation: jest.Mock;
+    getMessages: jest.Mock;
+    deleteConversation: jest.Mock;
   };
 
   const organizationId = 'org-1';
   const agentId = 'agent-1';
+  const conversationId = 'conv-1';
   const user = { id: 'user-1' };
 
   beforeEach(async () => {
     chatService = {
+      createConversation: jest.fn(),
+      listConversations: jest.fn(),
       sendMessage: jest.fn(),
-      getHistory: jest.fn(),
-      resetConversation: jest.fn(),
+      getMessages: jest.fn(),
+      deleteConversation: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -42,22 +47,62 @@ describe('ChatController', () => {
     expect(controller).toBeDefined();
   });
 
+  describe('createConversation', () => {
+    it('delegates to ChatService.createConversation with the caller', async () => {
+      const response = { id: conversationId };
+      chatService.createConversation.mockResolvedValue(response);
+
+      const result = await controller.createConversation(
+        organizationId,
+        agentId,
+        user,
+      );
+
+      expect(chatService.createConversation).toHaveBeenCalledWith(
+        agentId,
+        organizationId,
+        user.id,
+      );
+      expect(result).toEqual(response);
+    });
+  });
+
+  describe('listConversations', () => {
+    it('delegates to ChatService.listConversations', async () => {
+      const response = [{ id: conversationId }];
+      chatService.listConversations.mockResolvedValue(response);
+
+      const result = await controller.listConversations(
+        organizationId,
+        agentId,
+        user,
+      );
+
+      expect(chatService.listConversations).toHaveBeenCalledWith(
+        agentId,
+        organizationId,
+        user.id,
+      );
+      expect(result).toEqual(response);
+    });
+  });
+
   describe('sendMessage', () => {
     it('delegates to ChatService.sendMessage with the caller and message', async () => {
-      const response = { conversationId: 'conv-1', message: 'hi back' };
+      const response = { conversationId, message: 'hi back' };
       chatService.sendMessage.mockResolvedValue(response);
 
       const result = await controller.sendMessage(
         organizationId,
         agentId,
+        conversationId,
         user,
-        {
-          message: 'hello',
-        },
+        { message: 'hello' },
       );
 
       expect(chatService.sendMessage).toHaveBeenCalledWith(
         agentId,
+        conversationId,
         organizationId,
         user.id,
         'hello',
@@ -66,15 +111,21 @@ describe('ChatController', () => {
     });
   });
 
-  describe('getHistory', () => {
-    it('delegates to ChatService.getHistory', async () => {
-      const response = { conversationId: 'conv-1', messages: [] };
-      chatService.getHistory.mockResolvedValue(response);
+  describe('getMessages', () => {
+    it('delegates to ChatService.getMessages', async () => {
+      const response = { conversationId, messages: [] };
+      chatService.getMessages.mockResolvedValue(response);
 
-      const result = await controller.getHistory(organizationId, agentId, user);
-
-      expect(chatService.getHistory).toHaveBeenCalledWith(
+      const result = await controller.getMessages(
+        organizationId,
         agentId,
+        conversationId,
+        user,
+      );
+
+      expect(chatService.getMessages).toHaveBeenCalledWith(
+        agentId,
+        conversationId,
         organizationId,
         user.id,
       );
@@ -82,18 +133,20 @@ describe('ChatController', () => {
     });
   });
 
-  describe('resetConversation', () => {
-    it('delegates to ChatService.resetConversation', async () => {
-      chatService.resetConversation.mockResolvedValue(undefined);
+  describe('deleteConversation', () => {
+    it('delegates to ChatService.deleteConversation', async () => {
+      chatService.deleteConversation.mockResolvedValue(undefined);
 
-      const result = await controller.resetConversation(
+      const result = await controller.deleteConversation(
         organizationId,
         agentId,
+        conversationId,
         user,
       );
 
-      expect(chatService.resetConversation).toHaveBeenCalledWith(
+      expect(chatService.deleteConversation).toHaveBeenCalledWith(
         agentId,
+        conversationId,
         organizationId,
         user.id,
       );

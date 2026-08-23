@@ -22,45 +22,83 @@ import { OrganizationId } from '../common/decorators/organization-id.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/express';
 
-@Controller('agents/:agentId/chat')
+@Controller('agents/:agentId/conversations')
 @UseGuards(PermissionGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Post()
   @RequirePermission(PERMISSIONS.AGENT_READ)
+  createConversation(
+    @OrganizationId() organizationId: string,
+    @Param('agentId', ParseUUIDPipe) agentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatService.createConversation(
+      agentId,
+      organizationId,
+      user.id,
+    );
+  }
+
+  @Get()
+  @RequirePermission(PERMISSIONS.AGENT_READ)
+  listConversations(
+    @OrganizationId() organizationId: string,
+    @Param('agentId', ParseUUIDPipe) agentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatService.listConversations(agentId, organizationId, user.id);
+  }
+
+  @Post(':conversationId/messages')
+  @RequirePermission(PERMISSIONS.AGENT_READ)
   sendMessage(
     @OrganizationId() organizationId: string,
     @Param('agentId', ParseUUIDPipe) agentId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SendMessageDto,
   ) {
     return this.chatService.sendMessage(
       agentId,
+      conversationId,
       organizationId,
       user.id,
       dto.message,
     );
   }
 
-  @Get()
+  @Get(':conversationId/messages')
   @RequirePermission(PERMISSIONS.AGENT_READ)
-  getHistory(
+  getMessages(
     @OrganizationId() organizationId: string,
     @Param('agentId', ParseUUIDPipe) agentId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.chatService.getHistory(agentId, organizationId, user.id);
+    return this.chatService.getMessages(
+      agentId,
+      conversationId,
+      organizationId,
+      user.id,
+    );
   }
 
-  @Delete()
+  @Delete(':conversationId')
   @RequirePermission(PERMISSIONS.AGENT_READ)
   @HttpCode(HttpStatus.NO_CONTENT)
-  resetConversation(
+  deleteConversation(
     @OrganizationId() organizationId: string,
     @Param('agentId', ParseUUIDPipe) agentId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.chatService.resetConversation(agentId, organizationId, user.id);
+    return this.chatService.deleteConversation(
+      agentId,
+      conversationId,
+      organizationId,
+      user.id,
+    );
   }
 }
