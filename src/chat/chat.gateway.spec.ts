@@ -3,20 +3,31 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 
 import { ChatGateway } from './chat.gateway';
+import { ChatService } from './chat.service';
 import { ConversationsService } from './conversations.service';
+import { RbacService } from '../rbac/rbac.service';
+import { PERMISSIONS } from '../rbac/constants/permissions';
 
 describe('ChatGateway', () => {
   let gateway: ChatGateway;
   let jwtService: { verifyAsync: jest.Mock };
   let configService: { get: jest.Mock };
   let conversationsService: { findOwned: jest.Mock };
+  let chatService: { sendMessage: jest.Mock };
+  let rbacService: { hasPermission: jest.Mock };
 
   const agentId = 'agent-1';
   const conversationId = 'conv-1';
   const userId = 'user-1';
+  const organizationId = 'org-1';
 
-  const makeClient = (token?: string) => ({
-    handshake: { auth: token !== undefined ? { token } : {} },
+  const makeClient = (token?: string, orgId?: string) => ({
+    handshake: {
+      auth: {
+        ...(token !== undefined ? { token } : {}),
+        ...(orgId !== undefined ? { organizationId: orgId } : {}),
+      },
+    },
     data: {} as Record<string, unknown>,
     disconnect: jest.fn(),
     emit: jest.fn(),
@@ -27,6 +38,8 @@ describe('ChatGateway', () => {
     jwtService = { verifyAsync: jest.fn() };
     configService = { get: jest.fn().mockReturnValue('secret') };
     conversationsService = { findOwned: jest.fn() };
+    chatService = { sendMessage: jest.fn() };
+    rbacService = { hasPermission: jest.fn().mockResolvedValue(true) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -34,6 +47,8 @@ describe('ChatGateway', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         { provide: ConversationsService, useValue: conversationsService },
+        { provide: ChatService, useValue: chatService },
+        { provide: RbacService, useValue: rbacService },
       ],
     }).compile();
 
@@ -42,7 +57,16 @@ describe('ChatGateway', () => {
 
   describe('handleConnection', () => {
     it('disconnects a client with no token', async () => {
-      const client = makeClient(undefined);
+      const client = makeClient(undefined, organizationId);
+
+      await gateway.handleConnection(client as never);
+
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+    });
+
+    it('disconnects a client with no organizationId', async () => {
+      const client = makeClient('good.token', undefined);
 
       await gateway.handleConnection(client as never);
 
@@ -52,21 +76,22 @@ describe('ChatGateway', () => {
 
     it('disconnects a client with an invalid token', async () => {
       jwtService.verifyAsync.mockRejectedValueOnce(new Error('bad token'));
-      const client = makeClient('bad.token');
+      const client = makeClient('bad.token', organizationId);
 
       await gateway.handleConnection(client as never);
 
       expect(client.disconnect).toHaveBeenCalledWith(true);
     });
 
-    it('stores the userId on the client for a valid token', async () => {
+    it('stores the userId and organizationId on the client for a valid token', async () => {
       jwtService.verifyAsync.mockResolvedValueOnce({ sub: userId });
-      const client = makeClient('good.token');
+      const client = makeClient('good.token', organizationId);
 
       await gateway.handleConnection(client as never);
 
       expect(client.disconnect).not.toHaveBeenCalled();
       expect(client.data.userId).toBe(userId);
+      expect(client.data.organizationId).toBe(organizationId);
     });
   });
 
@@ -101,6 +126,103 @@ describe('ChatGateway', () => {
       expect(client.join).not.toHaveBeenCalled();
       expect(client.emit).toHaveBeenCalledWith('error', {
         message: 'Conversation not found',
+      });
+    });
+  });
+
+  describe('handleSendMessage', () => {
+    const dto = { agentId, conversationId, message: 'hi' };
+
+    it('emits sendMessageError when the client is missing auth data', async () => {
+      const client = makeClient();
+
+      await gateway.handleSendMessage(dto, client as never);
+
+      expect(rbacService.hasPermission).not.toHaveBeenCalled();
+      expect(chatService.sendMessage).not.toHaveBeenCalled();
+      expect(client.emit).toHaveBeenCalledWith('sendMessageError', {
+        message: 'Not authenticated',
+      });
+    });
+
+    it('emits sendMessageError when the caller lacks permission', async () => {
+      rbacService.hasPermission.mockResolvedValueOnce(false);
+      const client = makeClient();
+      client.data.userId = userId;
+      client.data.organizationId = organizationId;
+
+      await gateway.handleSendMessage(dto, client as never);
+
+      expect(rbacService.hasPermission).toHaveBeenCalledWith(
+        userId,
+        organizationId,
+        PERMISSIONS.AGENT_READ,
+      );
+      expect(chatService.sendMessage).not.toHaveBeenCalled();
+      expect(client.emit).toHaveBeenCalledWith('sendMessageError', {
+        message: 'Insufficient permissions',
+      });
+    });
+
+    it('delegates to ChatService.sendMessage and emits messageSent on success', async () => {
+      const result = { conversationId, message: 'hi back' };
+      chatService.sendMessage.mockResolvedValueOnce(result);
+      const client = makeClient();
+      client.data.userId = userId;
+      client.data.organizationId = organizationId;
+
+      await gateway.handleSendMessage(dto, client as never);
+
+      expect(chatService.sendMessage).toHaveBeenCalledWith(
+        agentId,
+        conversationId,
+        organizationId,
+        userId,
+        'hi',
+        expect.any(Function),
+      );
+      expect(client.emit).toHaveBeenCalledWith('messageSent', result);
+    });
+
+    it('wires the onStep callback to emitStep for the conversation room', async () => {
+      chatService.sendMessage.mockImplementationOnce(
+        (
+          _agentId: string,
+          _conversationId: string,
+          _organizationId: string,
+          _userId: string,
+          _message: string,
+          onStep?: (event: { type: string }) => void,
+        ) => {
+          onStep?.({ type: 'thinking' });
+          return Promise.resolve({ conversationId, message: 'hi back' });
+        },
+      );
+      const roomEmit = jest.fn();
+      const to = jest.fn().mockReturnValue({ emit: roomEmit });
+      gateway.server = { to } as never;
+      const client = makeClient();
+      client.data.userId = userId;
+      client.data.organizationId = organizationId;
+
+      await gateway.handleSendMessage(dto, client as never);
+
+      expect(to).toHaveBeenCalledWith(`conversation:${conversationId}`);
+      expect(roomEmit).toHaveBeenCalledWith('thinking', { type: 'thinking' });
+    });
+
+    it('emits sendMessageError when ChatService.sendMessage throws', async () => {
+      chatService.sendMessage.mockRejectedValueOnce(
+        new Error('Agent not found'),
+      );
+      const client = makeClient();
+      client.data.userId = userId;
+      client.data.organizationId = organizationId;
+
+      await gateway.handleSendMessage(dto, client as never);
+
+      expect(client.emit).toHaveBeenCalledWith('sendMessageError', {
+        message: 'Agent not found',
       });
     });
   });
