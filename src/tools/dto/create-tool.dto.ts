@@ -6,12 +6,9 @@ import {
   IsString,
   Matches,
   MaxLength,
-  ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 import { Trim } from '../../common/decorators/trim.decorator';
-import { HttpToolConfigDto } from './http-tool-config.dto';
 
 export class CreateToolDto {
   // This is what the model sees and must echo back verbatim in a
@@ -27,12 +24,16 @@ export class CreateToolDto {
   })
   name!: string;
 
-  @IsIn(['http'])
-  type!: 'http';
+  @IsIn(['http', 'database', 'custom_js'])
+  type!: string;
 
-  @ValidateNested()
-  @Type(() => HttpToolConfigDto)
-  config!: HttpToolConfigDto;
+  // Deep-shape validation happens in validateToolConfig (called from
+  // ToolsController), which picks the concrete config DTO based on `type`
+  // (and, for 'database', config.engine) and validates against that —
+  // config's shape genuinely varies by type, so it can't be a single fixed
+  // nested DTO here.
+  @IsObject()
+  config!: Record<string, unknown>;
 
   // What the LLM sees when deciding whether/how to call this tool. Required
   // for new tools — Phase 3 predates chat, so existing rows may lack one.

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ToolsService } from './tools.service';
 import { DATABASE } from '../database/database.module';
+import { ToolExecutorRegistry } from './executors/tool-executor.registry';
 
 describe('ToolsService', () => {
   let service: ToolsService;
@@ -16,6 +17,8 @@ describe('ToolsService', () => {
     delete: jest.Mock;
     returning: jest.Mock;
   };
+  let mockExecutor: { execute: jest.Mock };
+  let mockRegistry: { get: jest.Mock };
 
   const organizationId = 'org-1';
   const toolRow = {
@@ -42,8 +45,17 @@ describe('ToolsService', () => {
       returning: jest.fn(),
     };
 
+    mockExecutor = {
+      execute: jest.fn().mockResolvedValue({ ok: true, status: 200, body: {} }),
+    };
+    mockRegistry = { get: jest.fn().mockReturnValue(mockExecutor) };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ToolsService, { provide: DATABASE, useValue: mockDb }],
+      providers: [
+        ToolsService,
+        { provide: DATABASE, useValue: mockDb },
+        { provide: ToolExecutorRegistry, useValue: mockRegistry },
+      ],
     }).compile();
 
     service = module.get<ToolsService>(ToolsService);
@@ -153,117 +165,40 @@ describe('ToolsService', () => {
     });
   });
 
+  // Per-type behavior lives in each executor's own spec (see
+  // src/tools/executors/*.spec.ts) — ToolsService.execute is just a
+  // one-line delegate to ToolExecutorRegistry, so these tests only cover
+  // that delegation.
   describe('execute', () => {
     const httpTool = {
       type: 'http',
       config: { url: 'https://example.com/weather', method: 'GET' },
     };
 
-    it('throws for an unsupported tool type', async () => {
+    it('delegates to the executor resolved from the registry for the tool type', async () => {
+      const result = await service.execute(httpTool, { city: 'NYC' });
+
+      expect(mockRegistry.get).toHaveBeenCalledWith('http');
+      expect(mockExecutor.execute).toHaveBeenCalledWith(httpTool.config, {
+        city: 'NYC',
+      });
+      expect(result).toEqual({ ok: true, status: 200, body: {} });
+    });
+
+    it('defaults a null config to an empty object before delegating', async () => {
+      await service.execute({ type: 'http', config: null }, {});
+
+      expect(mockExecutor.execute).toHaveBeenCalledWith({}, {});
+    });
+
+    it('propagates the registry throwing for an unsupported tool type', async () => {
+      mockRegistry.get.mockImplementation(() => {
+        throw new Error('Unsupported tool type: db');
+      });
+
       await expect(
         service.execute({ type: 'db', config: {} }, {}),
       ).rejects.toThrow('Unsupported tool type: db');
-    });
-
-    it('appends args as query params for GET and returns a parsed JSON body', async () => {
-      const fetchMock = jest.fn().mockResolvedValue(
-        new Response(JSON.stringify({ temp: 72 }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-      );
-      jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
-
-      const result = await service.execute(httpTool, { city: 'NYC' });
-
-      const [calledUrl] = fetchMock.mock.calls[0] as [URL];
-      expect(calledUrl.toString()).toBe('https://example.com/weather?city=NYC');
-      expect(result).toEqual({
-        ok: true,
-        status: 200,
-        body: { temp: 72 },
-        truncated: false,
-      });
-    });
-
-    it('JSON-stringifies object-valued args instead of using [object Object]', async () => {
-      const fetchMock = jest
-        .fn()
-        .mockResolvedValue(new Response('{}', { status: 200 }));
-      jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
-
-      await service.execute(httpTool, { filter: { active: true } });
-
-      const [calledUrl] = fetchMock.mock.calls[0] as [URL];
-      expect(calledUrl.searchParams.get('filter')).toBe(
-        JSON.stringify({ active: true }),
-      );
-    });
-
-    it('sends args as a JSON body for POST', async () => {
-      const fetchMock = jest
-        .fn()
-        .mockResolvedValue(new Response('{"ok":true}', { status: 201 }));
-      jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
-
-      const postTool = {
-        type: 'http',
-        config: { url: 'https://example.com/orders', method: 'POST' },
-      };
-
-      const result = await service.execute(postTool, { item: 'widget' });
-
-      const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-      expect(init.method).toBe('POST');
-      expect(init.body).toBe(JSON.stringify({ item: 'widget' }));
-      expect(result.ok).toBe(true);
-      expect(result.status).toBe(201);
-    });
-
-    it('returns an ok:false shape (never throws) for a non-2xx response', async () => {
-      const fetchMock = jest
-        .fn()
-        .mockResolvedValue(
-          new Response('Not Found', { status: 404, statusText: 'Not Found' }),
-        );
-      jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
-
-      const result = await service.execute(httpTool, {});
-
-      expect(result.ok).toBe(false);
-      expect(result.status).toBe(404);
-      expect(result.body).toBe('Not Found');
-    });
-
-    it('returns status 0 (never throws) on a network failure', async () => {
-      jest.spyOn(global, 'fetch').mockRejectedValue(new Error('fetch failed'));
-
-      const result = await service.execute(httpTool, {});
-
-      expect(result).toEqual({
-        ok: false,
-        status: 0,
-        body: { error: 'fetch failed' },
-      });
-    });
-
-    it('truncates a response body larger than the byte cap', async () => {
-      const bigChunk = 'a'.repeat(1024);
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          for (let i = 0; i < 300; i++) {
-            controller.enqueue(new TextEncoder().encode(bigChunk));
-          }
-          controller.close();
-        },
-      });
-      const response = new Response(stream, { status: 200 });
-      jest.spyOn(global, 'fetch').mockResolvedValue(response);
-
-      const result = await service.execute(httpTool, {});
-
-      expect(result.truncated).toBe(true);
-      expect(result.ok).toBe(true);
     });
   });
 });

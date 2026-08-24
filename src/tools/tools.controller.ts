@@ -17,6 +17,7 @@ import { ToolInput, ToolsService } from './tools.service';
 import { CreateToolDto } from './dto/create-tool.dto';
 import { UpdateToolDto } from './dto/update-tool.dto';
 import { TestToolDto } from './dto/test-tool.dto';
+import { validateToolConfig } from './dto/validate-tool-config';
 
 import { PermissionGuard } from '../rbac/guards/permission.guard';
 import { RequirePermission } from '../rbac/decorators/require-permission.decorator';
@@ -31,14 +32,20 @@ export class ToolsController {
 
   @Post()
   @RequirePermission(PERMISSIONS.TOOL_CREATE)
-  create(@OrganizationId() organizationId: string, @Body() dto: CreateToolDto) {
-    // Validated by CreateToolDto's nested HttpToolConfigDto — ToolsService
-    // stores config as opaque jsonb so it stays agnostic to future tool
-    // types with a different config shape.
-    return this.toolsService.create(
-      organizationId,
-      dto as unknown as ToolInput,
-    );
+  async create(
+    @OrganizationId() organizationId: string,
+    @Body() dto: CreateToolDto,
+  ) {
+    // config's shape varies by type (http/database/custom_js), so it's
+    // validated here against the matching concrete config DTO rather than a
+    // single fixed nested DTO — ToolsService still stores it as opaque
+    // jsonb.
+    const config = await validateToolConfig(dto.type, dto.config);
+
+    return this.toolsService.create(organizationId, {
+      ...dto,
+      config,
+    });
   }
 
   @Get()
@@ -69,11 +76,25 @@ export class ToolsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateToolDto,
   ) {
-    const tool = await this.toolsService.update(
-      id,
-      organizationId,
-      dto as unknown as Partial<ToolInput>,
-    );
+    // type is optional on a PATCH (UpdateToolDto is a PartialType), so when
+    // only config changes we need the existing row's type to know which
+    // concrete config DTO to validate against.
+    const existing = await this.toolsService.findOne(id, organizationId);
+
+    if (!existing) {
+      throw new NotFoundException('Tool not found');
+    }
+
+    const update = dto as unknown as Partial<ToolInput>;
+
+    if (dto.config) {
+      update.config = await validateToolConfig(
+        dto.type ?? existing.type,
+        dto.config,
+      );
+    }
+
+    const tool = await this.toolsService.update(id, organizationId, update);
 
     if (!tool) {
       throw new NotFoundException('Tool not found');

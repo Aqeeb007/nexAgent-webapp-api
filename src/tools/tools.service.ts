@@ -7,7 +7,8 @@ import {
   DATABASE,
 } from '../database/database.module';
 import { tools } from '../database/schema/tools';
-import { HttpToolMethod } from './dto/http-tool-config.dto';
+import { ToolExecutorRegistry } from './executors/tool-executor.registry';
+import type { ToolExecutionResult } from './executors/tool-executor.interface';
 
 export interface ToolInput {
   name: string;
@@ -17,18 +18,7 @@ export interface ToolInput {
   parameters?: Record<string, unknown>;
 }
 
-interface HttpToolConfig {
-  url: string;
-  method: HttpToolMethod;
-  headers?: Record<string, string>;
-}
-
-export interface ToolExecutionResult {
-  ok: boolean;
-  status: number;
-  body: unknown;
-  truncated?: boolean;
-}
+export type { ToolExecutionResult };
 
 const TOOL_COLUMNS = {
   id: tools.id,
@@ -44,47 +34,12 @@ const TOOL_COLUMNS = {
 
 type ToolRow = typeof tools.$inferSelect;
 
-const EXECUTE_TIMEOUT_MS = 10_000;
-const MAX_RESPONSE_BYTES = 256 * 1024;
-const BODY_METHODS: HttpToolMethod[] = ['POST', 'PUT', 'PATCH'];
-
-async function readWithLimit(
-  response: Response,
-  maxBytes: number,
-): Promise<{ text: string; truncated: boolean }> {
-  const reader = response.body?.getReader();
-
-  if (!reader) {
-    return { text: await response.text(), truncated: false };
-  }
-
-  const decoder = new TextDecoder();
-  let received = 0;
-  let text = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) {
-      break;
-    }
-
-    received += value.byteLength;
-
-    if (received > maxBytes) {
-      await reader.cancel();
-      return { text, truncated: true };
-    }
-
-    text += decoder.decode(value, { stream: true });
-  }
-
-  return { text, truncated: false };
-}
-
 @Injectable()
 export class ToolsService {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    private readonly executorRegistry: ToolExecutorRegistry,
+  ) {}
 
   async create(organizationId: string, data: ToolInput, tx?: Transaction) {
     const executor = tx ?? this.db;
@@ -144,64 +99,8 @@ export class ToolsService {
     tool: Pick<ToolRow, 'type' | 'config'>,
     args: Record<string, unknown>,
   ): Promise<ToolExecutionResult> {
-    if (tool.type !== 'http') {
-      throw new Error(`Unsupported tool type: ${tool.type}`);
-    }
-
-    // Trusted to match HttpToolConfigDto's shape — config is only ever
-    // written through CreateToolDto/UpdateToolDto's nested validation.
-    const config = tool.config as unknown as HttpToolConfig;
-    const usesBody = BODY_METHODS.includes(config.method);
-
-    const url = new URL(config.url);
-
-    if (!usesBody) {
-      for (const [key, value] of Object.entries(args)) {
-        url.searchParams.set(
-          key,
-          typeof value === 'object' && value !== null
-            ? JSON.stringify(value)
-            : String(value),
-        );
-      }
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), EXECUTE_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        method: config.method,
-        headers: { 'content-type': 'application/json', ...config.headers },
-        body: usesBody ? JSON.stringify(args) : undefined,
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-
-      const { text, truncated } = await readWithLimit(
-        response,
-        MAX_RESPONSE_BYTES,
-      );
-
-      let body: unknown = text;
-
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        // Not JSON — keep the raw text.
-      }
-
-      return { ok: response.ok, status: response.status, body, truncated };
-    } catch (error) {
-      return {
-        ok: false,
-        status: 0,
-        body: {
-          error: error instanceof Error ? error.message : 'Tool request failed',
-        },
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.executorRegistry
+      .get(tool.type)
+      .execute(tool.config ?? {}, args);
   }
 }

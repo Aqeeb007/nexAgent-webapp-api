@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ToolsController } from './tools.controller';
 import { ToolsService } from './tools.service';
@@ -55,19 +55,47 @@ describe('ToolsController', () => {
   });
 
   describe('create', () => {
-    it('delegates to ToolsService.create scoped to the organization', async () => {
+    const dto = {
+      name: 'Weather API',
+      type: 'http' as const,
+      config: { url: 'https://example.com/weather', method: 'GET' as const },
+      description: 'Gets the current weather for a city',
+    };
+
+    it('validates config against the type and delegates to ToolsService.create', async () => {
       toolsService.create.mockResolvedValue(tool);
-      const dto = {
-        name: 'Weather API',
-        type: 'http' as const,
-        config: { url: 'https://example.com/weather', method: 'GET' as const },
-        description: 'Gets the current weather for a city',
-      };
 
       const result = await controller.create(organizationId, dto);
 
-      expect(toolsService.create).toHaveBeenCalledWith(organizationId, dto);
+      expect(toolsService.create).toHaveBeenCalledWith(
+        organizationId,
+        expect.objectContaining({
+          name: 'Weather API',
+          type: 'http',
+          config: { url: 'https://example.com/weather', method: 'GET' },
+        }),
+      );
       expect(result).toEqual(tool);
+    });
+
+    it('rejects an invalid config for the given type without calling the service', async () => {
+      await expect(
+        controller.create(organizationId, {
+          ...dto,
+          config: { url: 'not-a-url', method: 'GET' as const },
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(toolsService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unsupported tool type without calling the service', async () => {
+      await expect(
+        controller.create(organizationId, {
+          ...dto,
+          type: 'unsupported',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(toolsService.create).not.toHaveBeenCalled();
     });
   });
 
@@ -109,6 +137,7 @@ describe('ToolsController', () => {
   describe('update', () => {
     it('returns the updated tool when found', async () => {
       const updated = { ...tool, name: 'Renamed' };
+      toolsService.findOne.mockResolvedValue(tool);
       toolsService.update.mockResolvedValue(updated);
 
       const result = await controller.update(organizationId, 'tool-1', {
@@ -123,12 +152,41 @@ describe('ToolsController', () => {
       expect(result).toEqual(updated);
     });
 
-    it('throws NotFoundException when the tool is missing', async () => {
-      toolsService.update.mockResolvedValue(null);
+    it('throws NotFoundException when the tool is missing, without calling update', async () => {
+      toolsService.findOne.mockResolvedValue(null);
 
       await expect(
         controller.update(organizationId, 'missing', { name: 'Renamed' }),
       ).rejects.toThrow(NotFoundException);
+      expect(toolsService.update).not.toHaveBeenCalled();
+    });
+
+    it("validates config against the existing tool's type when the patch omits type", async () => {
+      toolsService.findOne.mockResolvedValue(tool); // tool.type === 'http'
+      toolsService.update.mockResolvedValue(tool);
+
+      await controller.update(organizationId, 'tool-1', {
+        config: { url: 'https://example.com/new', method: 'GET' as const },
+      });
+
+      expect(toolsService.update).toHaveBeenCalledWith(
+        'tool-1',
+        organizationId,
+        expect.objectContaining({
+          config: { url: 'https://example.com/new', method: 'GET' },
+        }),
+      );
+    });
+
+    it('rejects an invalid config for the resolved type without calling update', async () => {
+      toolsService.findOne.mockResolvedValue(tool); // http
+
+      await expect(
+        controller.update(organizationId, 'tool-1', {
+          config: { url: 'not-a-url', method: 'GET' as const },
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(toolsService.update).not.toHaveBeenCalled();
     });
   });
 
