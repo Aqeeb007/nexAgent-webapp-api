@@ -39,7 +39,7 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    return this.db.transaction(async (tx) => {
+    const { user, organization } = await this.db.transaction(async (tx) => {
       // DB unique constraint on email is the source of truth; usersService
       // .createUser turns a conflicting insert into a ConflictException.
       const user = await this.usersService.createUser(
@@ -60,6 +60,13 @@ export class AuthService {
 
       return { user, organization };
     });
+
+    // The frontend treats a successful register the same as a login (it
+    // redirects straight into the app), so register must hand back the same
+    // token-pair shape login() does — not just the created rows.
+    const tokens = await this.issueTokenPair(user);
+
+    return { ...tokens, user, organization };
   }
 
   async login(dto: LoginDto) {

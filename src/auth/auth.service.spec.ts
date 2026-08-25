@@ -122,11 +122,17 @@ describe('AuthService', () => {
       slug: 'janes-organization-abcd1234',
     };
 
-    it('creates the user and their owned organization inside one transaction', async () => {
+    it('creates the user and their owned organization inside one transaction, and returns a token pair', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
       mockUsersService.createUser.mockResolvedValueOnce(insertedUser);
       mockOrganizationsService.createOwned.mockResolvedValueOnce(
         insertedOrganization,
+      );
+      mockTokenService.signAccessToken.mockResolvedValueOnce('access-token');
+      mockTokenService.signRefreshToken.mockResolvedValueOnce('refresh-token');
+      mockTokenService.hashToken.mockReturnValueOnce('hashed-refresh-token');
+      mockTokenService.decodeExpiry.mockReturnValueOnce(
+        new Date('2099-01-01T00:00:00Z'),
       );
 
       const result = await service.register(registerDto);
@@ -150,7 +156,16 @@ describe('AuthService', () => {
         mockTx,
       );
 
+      expect(mockRefreshTokensService.create).toHaveBeenCalledWith(
+        insertedUser.id,
+        'hashed-refresh-token',
+        new Date('2099-01-01T00:00:00Z'),
+        undefined,
+      );
+
       expect(result).toEqual({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
         user: insertedUser,
         organization: insertedOrganization,
       });
