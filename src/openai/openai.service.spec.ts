@@ -19,11 +19,13 @@ describe('OpenAiService', () => {
   let service: OpenAiService;
   let mockClient: {
     chat: { completions: { create: jest.Mock } };
+    embeddings: { create: jest.Mock };
   };
 
   beforeEach(async () => {
     mockClient = {
       chat: { completions: { create: jest.fn() } },
+      embeddings: { create: jest.fn() },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -138,5 +140,27 @@ describe('OpenAiService', () => {
     ];
     expect(call.temperature).toBe(0.5);
     expect(call.seed).toBeUndefined();
+  });
+
+  describe('createEmbeddings', () => {
+    it('returns embeddings in input order', async () => {
+      mockClient.embeddings.create.mockResolvedValueOnce({
+        data: [
+          { index: 0, embedding: [0.1, 0.2] },
+          { index: 1, embedding: [0.3, 0.4] },
+        ],
+      });
+
+      const result = await service.createEmbeddings(['a', 'b']);
+
+      expect(result).toEqual([
+        [0.1, 0.2],
+        [0.3, 0.4],
+      ]);
+      expect(mockClient.embeddings.create).toHaveBeenCalledWith({
+        model: 'text-embedding-3-small',
+        input: ['a', 'b'],
+      });
+    });
   });
 });

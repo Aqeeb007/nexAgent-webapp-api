@@ -1,15 +1,18 @@
 import {
   BadGatewayException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type {
   ChatCompletionMessage,
+  ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
 
 import { AgentsService } from '../agents/agents.service';
 import { AgentToolsService } from '../agent-tools/agent-tools.service';
+import { AgentDocumentsService } from '../agent-documents/agent-documents.service';
 import { ToolsService } from '../tools/tools.service';
 import {
   OpenAiService,
@@ -61,10 +64,13 @@ function toOpenAiToolDef(
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly agentsService: AgentsService,
     private readonly conversationsService: ConversationsService,
     private readonly agentToolsService: AgentToolsService,
+    private readonly agentDocumentsService: AgentDocumentsService,
     private readonly toolsService: ToolsService,
     private readonly openAiService: OpenAiService,
     private readonly rbacService: RbacService,
@@ -130,6 +136,40 @@ export class ChatService {
       userMessage,
     );
 
+    // RAG retrieval — embedded once per call (not once per tool-calling
+    // round, since the user's message doesn't change across rounds), rides
+    // on AGENT_READ (no separate permission, unlike TOOL_EXECUTE below)
+    // since it's a read-only internal vector search with no side effect.
+    // Failure degrades gracefully: log and continue without knowledge
+    // context rather than failing the whole send.
+    let knowledgeMessage: ChatCompletionMessageParam | undefined;
+
+    try {
+      const [queryEmbedding] = await this.openAiService.createEmbeddings([
+        userMessage,
+      ]);
+      const chunks = await this.agentDocumentsService.searchRelevant(
+        agentId,
+        organizationId,
+        queryEmbedding,
+      );
+
+      if (chunks.length > 0) {
+        knowledgeMessage = {
+          role: 'system',
+          content: `Relevant knowledge base excerpts:\n\n${chunks
+            .map((chunk) => chunk.content)
+            .join('\n\n---\n\n')}`,
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Knowledge base retrieval failed, continuing without it: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+    }
+
     // Tool-calling is gated independently of AGENT_READ (which is all
     // chatting itself requires) — a caller without TOOL_EXECUTE gets a
     // tools-free conversation rather than being able to trigger a
@@ -175,6 +215,7 @@ export class ChatService {
           model: agent.model,
           messages: [
             { role: 'system', content: agent.systemPrompt },
+            ...(knowledgeMessage ? [knowledgeMessage] : []),
             ...toOpenAiMessages(history),
           ],
           tools: toolDefs,

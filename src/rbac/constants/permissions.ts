@@ -22,6 +22,10 @@ export const PERMISSIONS = {
   WORKFLOW_READ: 'workflow:read',
   WORKFLOW_UPDATE: 'workflow:update',
   WORKFLOW_DELETE: 'workflow:delete',
+
+  DOCUMENT_CREATE: 'document:create',
+  DOCUMENT_READ: 'document:read',
+  DOCUMENT_DELETE: 'document:delete',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

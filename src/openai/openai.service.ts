@@ -59,9 +59,23 @@ function toOpenAiParams(
   return params;
 }
 
+// Hardcoded, not per-agent configurable — agent.model is about the chat
+// completion model only. Dimensions must match EMBEDDING_DIMENSIONS in
+// src/database/schema/document-chunks.ts.
+const EMBEDDING_MODEL = 'text-embedding-3-small';
+
 @Injectable()
 export class OpenAiService {
   constructor(@Inject(OPENAI_CLIENT) private readonly client: OpenAI) {}
+
+  async createEmbeddings(input: string[]): Promise<number[][]> {
+    const response = await this.client.embeddings.create({
+      model: EMBEDDING_MODEL,
+      input,
+    });
+
+    return response.data.map((embedding) => embedding.embedding);
+  }
 
   async createChatCompletion({
     model,

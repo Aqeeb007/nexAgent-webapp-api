@@ -21,30 +21,33 @@ re-derive it from scratch:
 
 **MVP first, then the documented V2 order — don't skip ahead of it.** The MVP flow in
 [docs/MVP_REQUIREMENTS.md](./docs/MVP_REQUIREMENTS.md#mvp-definition-of-done) is complete and
-live-verified (see status below), so the "don't build this yet" list has narrowed: Kubernetes,
-microservices, Kafka, a workflow engine, or a full observability stack are still off-limits until
-the phases ahead of them in
+live-verified, and Phase 5 (RAG) is now done too (see status below), so the "don't build this yet"
+list is: Kubernetes, microservices, Kafka, a workflow engine, Background Jobs/BullMQ, or a full
+observability stack, until the phases ahead of them in
 [docs/ROADMAP.md#post-mvp-progression-v2-and-beyond](./docs/ROADMAP.md#post-mvp-progression-v2-and-beyond)
-are done. RAG/vector DB (Phase 5) is the one exception — it's the confirmed current target, not a
-premature reach. If a request seems to call for something further down that list than the current
-phase, flag it and point back to this file rather than building it.
+are done. If a request seems to call for something further down that list than the current phase,
+flag it and point back to this file rather than building it.
 
 ## Current status (see docs/ROADMAP.md for detail)
 
 MVP complete and live-verified: Phases 1–3 (Auth + Organizations, Agent Builder, Tool Builder) and
-Phase 6 (chat + tool-calling loop, WebSocket streaming) are done. Now on **Phase 5 — Knowledge Base
-(RAG)**: design finalized 2026-08-28 (vector store: pgvector, reusing the existing Postgres/Drizzle
-setup), implementation not yet started — see
-[docs/ROADMAP.md](./docs/ROADMAP.md#phase-5--knowledge-base-rag) for the full plan.
+Phase 6 (chat + tool-calling loop, WebSocket streaming) are done. **Phase 5 — Knowledge Base
+(RAG)** is also done and live-verified (2026-09-06): upload PDF → chunk → embed (pgvector) → store
+→ search, wired into agent chat — see
+[docs/ROADMAP.md](./docs/ROADMAP.md#phase-5--knowledge-base-rag) for detail. Local dev Postgres now
+runs via `docker compose up -d` (`docker-compose.yml`, `pgvector/pgvector:pg16`) instead of a
+native install, to get the pgvector extension binary. Next up per the post-MVP progression: the
+Workflow Engine.
 
 ## Stack at a glance
 
-NestJS + TypeScript · Drizzle ORM + PostgreSQL (+ pgvector, planned for Phase 5) · pnpm · JWT auth ·
+NestJS + TypeScript · Drizzle ORM + PostgreSQL with pgvector (via Docker locally) · pnpm · JWT auth ·
 Redis (planned) · OpenAI API · Next.js frontend (separate app, not in this repo).
 
 ## Commands
 
 ```bash
+docker compose up -d # start local Postgres (pgvector/pgvector:pg16, port 5433)
 pnpm start:dev      # run API in watch mode
 pnpm test           # unit tests
 pnpm test:e2e        # e2e tests

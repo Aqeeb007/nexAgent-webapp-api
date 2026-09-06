@@ -10,6 +10,7 @@ import { ConversationsService } from './conversations.service';
 import { RbacModule } from '../rbac/rbac.module';
 import { AgentsModule } from '../agents/agents.module';
 import { AgentToolsModule } from '../agent-tools/agent-tools.module';
+import { AgentDocumentsModule } from '../agent-documents/agent-documents.module';
 import { ToolsModule } from '../tools/tools.module';
 import { OpenAiModule } from '../openai/openai.module';
 
@@ -18,6 +19,7 @@ import { OpenAiModule } from '../openai/openai.module';
     RbacModule,
     AgentsModule,
     AgentToolsModule,
+    AgentDocumentsModule,
     ToolsModule,
     OpenAiModule,
     // Registered locally (mirrors AuthModule's own JwtModule.registerAsync)

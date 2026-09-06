@@ -5,12 +5,14 @@ import { ChatService } from './chat.service';
 import { ConversationsService } from './conversations.service';
 import { AgentsService } from '../agents/agents.service';
 import { AgentToolsService } from '../agent-tools/agent-tools.service';
+import { AgentDocumentsService } from '../agent-documents/agent-documents.service';
 import { ToolsService } from '../tools/tools.service';
 import { OpenAiService } from '../openai/openai.service';
 import { RbacService } from '../rbac/rbac.service';
 
 interface CreateChatCompletionCallArg {
   tools?: { function: { name: string } }[];
+  messages?: { role: string; content: string }[];
 }
 
 describe('ChatService', () => {
@@ -26,8 +28,12 @@ describe('ChatService', () => {
     remove: jest.Mock;
   };
   let agentToolsService: { listFull: jest.Mock };
+  let agentDocumentsService: { searchRelevant: jest.Mock };
   let toolsService: { execute: jest.Mock };
-  let openAiService: { createChatCompletion: jest.Mock };
+  let openAiService: {
+    createChatCompletion: jest.Mock;
+    createEmbeddings: jest.Mock;
+  };
   let rbacService: { hasPermission: jest.Mock };
 
   const organizationId = 'org-1';
@@ -67,8 +73,12 @@ describe('ChatService', () => {
       remove: jest.fn(),
     };
     agentToolsService = { listFull: jest.fn().mockResolvedValue([]) };
+    agentDocumentsService = { searchRelevant: jest.fn().mockResolvedValue([]) };
     toolsService = { execute: jest.fn() };
-    openAiService = { createChatCompletion: jest.fn() };
+    openAiService = {
+      createChatCompletion: jest.fn(),
+      createEmbeddings: jest.fn().mockResolvedValue([[0.1, 0.2, 0.3]]),
+    };
     rbacService = { hasPermission: jest.fn().mockResolvedValue(false) };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -77,6 +87,7 @@ describe('ChatService', () => {
         { provide: AgentsService, useValue: agentsService },
         { provide: ConversationsService, useValue: conversationsService },
         { provide: AgentToolsService, useValue: agentToolsService },
+        { provide: AgentDocumentsService, useValue: agentDocumentsService },
         { provide: ToolsService, useValue: toolsService },
         { provide: OpenAiService, useValue: openAiService },
         { provide: RbacService, useValue: rbacService },
@@ -405,6 +416,61 @@ describe('ChatService', () => {
 
       expect(openAiService.createChatCompletion).toHaveBeenCalledTimes(5);
       expect(result.message).toMatch(/wasn't able to finish/);
+    });
+
+    it('injects a knowledge-base system message when relevant chunks are found', async () => {
+      agentDocumentsService.searchRelevant.mockResolvedValueOnce([
+        { content: 'The sky is blue.', documentName: 'facts.pdf' },
+      ]);
+      openAiService.createChatCompletion.mockResolvedValueOnce({
+        content: 'the sky is blue',
+        tool_calls: undefined,
+      });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'what color is the sky?',
+      );
+
+      expect(openAiService.createEmbeddings).toHaveBeenCalledWith([
+        'what color is the sky?',
+      ]);
+      expect(agentDocumentsService.searchRelevant).toHaveBeenCalledWith(
+        agentId,
+        organizationId,
+        [0.1, 0.2, 0.3],
+      );
+
+      const [call] = openAiService.createChatCompletion.mock.calls[0] as [
+        CreateChatCompletionCallArg,
+      ];
+      const knowledgeMessage = call.messages?.find(
+        (m) => m.role === 'system' && m.content.includes('The sky is blue.'),
+      );
+      expect(knowledgeMessage).toBeDefined();
+    });
+
+    it('continues without knowledge context when retrieval fails', async () => {
+      agentDocumentsService.searchRelevant.mockRejectedValueOnce(
+        new Error('embeddings API down'),
+      );
+      openAiService.createChatCompletion.mockResolvedValueOnce({
+        content: 'ok anyway',
+        tool_calls: undefined,
+      });
+
+      const result = await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
+
+      expect(result.message).toBe('ok anyway');
     });
 
     it('wraps an OpenAI failure in BadGatewayException without losing the user message', async () => {

@@ -13,6 +13,8 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { AgentsModule } from './agents/agents.module';
 import { ToolsModule } from './tools/tools.module';
 import { AgentToolsModule } from './agent-tools/agent-tools.module';
+import { DocumentsModule } from './documents/documents.module';
+import { AgentDocumentsModule } from './agent-documents/agent-documents.module';
 import { OpenAiModule } from './openai/openai.module';
 import { ChatModule } from './chat/chat.module';
 import * as Joi from 'joi';
@@ -46,6 +48,8 @@ import * as Joi from 'joi';
     AgentsModule,
     ToolsModule,
     AgentToolsModule,
+    DocumentsModule,
+    AgentDocumentsModule,
     OpenAiModule,
     ChatModule,
   ],
