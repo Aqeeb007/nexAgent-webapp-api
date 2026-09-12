@@ -7,12 +7,47 @@ import {
 
 interface CreateParamsCallArg {
   tools?: unknown[];
+  stream?: boolean;
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
   seed?: number;
+}
+
+// Minimal stand-in for the fields of ChatCompletionChunk.choices[0].delta
+// this service actually reads.
+interface FakeChunk {
+  choices: [
+    {
+      delta: {
+        content?: string | null;
+        tool_calls?: {
+          index: number;
+          id?: string;
+          function?: { name?: string; arguments?: string };
+        }[];
+      };
+    },
+  ];
+}
+
+// Fakes the async-iterable Stream<ChatCompletionChunk> the real SDK resolves
+// to when `stream: true` is passed — a plain resolved array wouldn't be
+// iterable with `for await`.
+function fakeStream(chunks: FakeChunk[]): AsyncIterable<FakeChunk> {
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    },
+  };
+}
+
+function contentChunk(content: string): FakeChunk {
+  return { choices: [{ delta: { content } }] };
 }
 
 describe('OpenAiService', () => {
@@ -42,24 +77,97 @@ describe('OpenAiService', () => {
     expect(service).toBeDefined();
   });
 
-  it('returns the first choice message from the completion', async () => {
-    const message = { role: 'assistant', content: 'hello' };
-    mockClient.chat.completions.create.mockResolvedValueOnce({
-      choices: [{ message }],
-    });
+  it('accumulates streamed content chunks into the final result', async () => {
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('hel'), contentChunk('lo')]),
+    );
 
     const result = await service.createChatCompletion({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: 'hi' }],
     });
 
-    expect(result).toEqual(message);
+    expect(result).toEqual({ content: 'hello', tool_calls: undefined });
   });
 
-  it('omits the tools param entirely when no tools are given', async () => {
-    mockClient.chat.completions.create.mockResolvedValueOnce({
-      choices: [{ message: { role: 'assistant', content: 'ok' } }],
+  it('invokes onDelta once per content chunk with the exact fragment', async () => {
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('hel'), contentChunk('lo')]),
+    );
+    const onDelta = jest.fn();
+
+    await service.createChatCompletion(
+      { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hi' }] },
+      onDelta,
+    );
+
+    expect(onDelta).toHaveBeenNthCalledWith(1, 'hel');
+    expect(onDelta).toHaveBeenNthCalledWith(2, 'lo');
+  });
+
+  it('concatenates tool-call name/argument fragments split across chunks by index', async () => {
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: 'call_1', function: { name: 'weat' } },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    function: { name: 'her', arguments: '{"city":' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, function: { arguments: '"NYC"}' } },
+                ],
+              },
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await service.createChatCompletion({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'weather in NYC' }],
     });
+
+    expect(result).toEqual({
+      content: null,
+      tool_calls: [
+        {
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'weather', arguments: '{"city":"NYC"}' },
+        },
+      ],
+    });
+  });
+
+  it('sets stream: true and omits the tools param entirely when no tools are given', async () => {
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('ok')]),
+    );
 
     await service.createChatCompletion({
       model: 'gpt-4o-mini',
@@ -69,13 +177,14 @@ describe('OpenAiService', () => {
     const [call] = mockClient.chat.completions.create.mock.calls[0] as [
       CreateParamsCallArg,
     ];
+    expect(call.stream).toBe(true);
     expect(call.tools).toBeUndefined();
   });
 
   it('passes tools through when provided', async () => {
-    mockClient.chat.completions.create.mockResolvedValueOnce({
-      choices: [{ message: { role: 'assistant', content: 'ok' } }],
-    });
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('ok')]),
+    );
     const tools = [
       {
         type: 'function' as const,
@@ -96,9 +205,9 @@ describe('OpenAiService', () => {
   });
 
   it('maps every known configuration field to its OpenAI param name', async () => {
-    mockClient.chat.completions.create.mockResolvedValueOnce({
-      choices: [{ message: { role: 'assistant', content: 'ok' } }],
-    });
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('ok')]),
+    );
 
     await service.createChatCompletion({
       model: 'gpt-4o-mini',
@@ -123,9 +232,9 @@ describe('OpenAiService', () => {
   });
 
   it('only forwards known configuration fields, dropping anything unrecognized', async () => {
-    mockClient.chat.completions.create.mockResolvedValueOnce({
-      choices: [{ message: { role: 'assistant', content: 'ok' } }],
-    });
+    mockClient.chat.completions.create.mockResolvedValueOnce(
+      fakeStream([contentChunk('ok')]),
+    );
 
     await service.createChatCompletion({
       model: 'gpt-4o-mini',

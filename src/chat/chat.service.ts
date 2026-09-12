@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
-  ChatCompletionMessage,
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
@@ -17,6 +16,7 @@ import { ToolsService } from '../tools/tools.service';
 import {
   OpenAiService,
   type AgentConfiguration,
+  type ChatCompletionResult,
 } from '../openai/openai.service';
 import { RbacService } from '../rbac/rbac.service';
 import { PERMISSIONS } from '../rbac/constants/permissions';
@@ -34,6 +34,7 @@ type AgentTool = Awaited<ReturnType<AgentToolsService['listFull']>>[number];
 
 export type ChatStepEvent =
   | { type: 'thinking' }
+  | { type: 'delta'; content: string }
   | { type: 'tool_call'; toolName: string }
   | { type: 'tool_result'; toolName: string; result: unknown }
   | { type: 'done'; content: string };
@@ -208,23 +209,27 @@ export class ChatService {
         conversation.id,
       );
 
-      let choice: ChatCompletionMessage;
+      let choice: ChatCompletionResult;
 
       try {
-        choice = await this.openAiService.createChatCompletion({
-          model: agent.model,
-          messages: [
-            { role: 'system', content: agent.systemPrompt },
-            ...(knowledgeMessage ? [knowledgeMessage] : []),
-            ...toOpenAiMessages(history),
-          ],
-          tools: toolDefs,
-          // Trusted to match AgentConfigurationDto's shape — configuration
-          // is only ever written through CreateAgentDto/UpdateAgentDto's
-          // nested validation.
-          configuration:
-            (agent.configuration as AgentConfiguration | null) ?? undefined,
-        });
+        choice = await this.openAiService.createChatCompletion(
+          {
+            model: agent.model,
+            messages: [
+              { role: 'system', content: agent.systemPrompt },
+              ...(knowledgeMessage ? [knowledgeMessage] : []),
+              ...toOpenAiMessages(history),
+            ],
+            tools: toolDefs,
+            // Trusted to match AgentConfigurationDto's shape — configuration
+            // is only ever written through CreateAgentDto/UpdateAgentDto's
+            // nested validation.
+            configuration:
+              (agent.configuration as AgentConfiguration | null) ?? undefined,
+          },
+          (deltaContent) =>
+            onStep?.({ type: 'delta', content: deltaContent }),
+        );
       } catch (error) {
         this.logger.error(
           `Chat completion request failed for agent ${agentId}: ${

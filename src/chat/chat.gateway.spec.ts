@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Logger } from '@nestjs/common';
 
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
@@ -77,10 +78,15 @@ describe('ChatGateway', () => {
     it('disconnects a client with an invalid token', async () => {
       jwtService.verifyAsync.mockRejectedValueOnce(new Error('bad token'));
       const client = makeClient('bad.token', organizationId);
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
 
       await gateway.handleConnection(client as never);
 
       expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
     });
 
     it('stores the userId and organizationId on the client for a valid token', async () => {

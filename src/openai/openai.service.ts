@@ -2,8 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import type {
-  ChatCompletionMessage,
   ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
 
@@ -32,6 +32,23 @@ interface CreateChatCompletionInput {
   messages: ChatCompletionMessageParam[];
   tools?: ChatCompletionTool[];
   configuration?: AgentConfiguration;
+}
+
+// The subset of the SDK's ChatCompletionMessage that callers actually use —
+// role/refusal/annotations/audio are dropped since nothing here reads them,
+// and reconstructing them from a token stream wouldn't be meaningful anyway.
+export interface ChatCompletionResult {
+  content: string | null;
+  tool_calls?: ChatCompletionMessageToolCall[];
+}
+
+// Accumulator for one in-progress tool call across the stream — id/type
+// arrive once, name/arguments arrive fragmented and must be concatenated
+// (never overwritten) as more chunks land at the same index.
+interface AccumulatingToolCall {
+  id?: string;
+  name: string;
+  arguments: string;
 }
 
 // The rest of this API is camelCase, but OpenAI's own params are
@@ -77,19 +94,66 @@ export class OpenAiService {
     return response.data.map((embedding) => embedding.embedding);
   }
 
-  async createChatCompletion({
-    model,
-    messages,
-    tools,
-    configuration,
-  }: CreateChatCompletionInput): Promise<ChatCompletionMessage> {
-    const completion = await this.client.chat.completions.create({
+  async createChatCompletion(
+    { model, messages, tools, configuration }: CreateChatCompletionInput,
+    onDelta?: (content: string) => void,
+  ): Promise<ChatCompletionResult> {
+    const stream = await this.client.chat.completions.create({
       model,
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
+      stream: true,
       ...toOpenAiParams(configuration),
     });
 
-    return completion.choices[0].message;
+    let content = '';
+    const toolCallsByIndex = new Map<number, AccumulatingToolCall>();
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+
+      if (!delta) {
+        continue;
+      }
+
+      if (delta.content) {
+        content += delta.content;
+        onDelta?.(delta.content);
+      }
+
+      for (const toolCallDelta of delta.tool_calls ?? []) {
+        const existing = toolCallsByIndex.get(toolCallDelta.index) ?? {
+          name: '',
+          arguments: '',
+        };
+
+        if (toolCallDelta.id) {
+          existing.id = toolCallDelta.id;
+        }
+        if (toolCallDelta.function?.name) {
+          existing.name += toolCallDelta.function.name;
+        }
+        if (toolCallDelta.function?.arguments) {
+          existing.arguments += toolCallDelta.function.arguments;
+        }
+
+        toolCallsByIndex.set(toolCallDelta.index, existing);
+      }
+    }
+
+    const toolCalls: ChatCompletionMessageToolCall[] = [
+      ...toolCallsByIndex.entries(),
+    ]
+      .sort(([a], [b]) => a - b)
+      .map(([, toolCall]) => ({
+        id: toolCall.id ?? '',
+        type: 'function',
+        function: { name: toolCall.name, arguments: toolCall.arguments },
+      }));
+
+    return {
+      content: content || null,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+    };
   }
 }

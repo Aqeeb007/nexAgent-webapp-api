@@ -73,7 +73,12 @@ export class ChatGateway implements OnGatewayConnection {
       );
       client.data.userId = payload.sub;
       client.data.organizationId = organizationId;
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `Socket handshake rejected: ${
+          error instanceof Error ? error.message : 'invalid token'
+        }`,
+      );
       client.disconnect(true);
     }
   }

@@ -225,6 +225,31 @@ describe('ChatService', () => {
       expect(agentToolsService.listFull).not.toHaveBeenCalled();
     });
 
+    it('forwards streamed content fragments as delta step events ahead of done', async () => {
+      openAiService.createChatCompletion.mockImplementationOnce(
+        async (_input, onDelta) => {
+          onDelta?.('hel');
+          onDelta?.('lo');
+          return { content: 'hello', tool_calls: undefined };
+        },
+      );
+      const onStep = jest.fn();
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+        onStep,
+      );
+
+      const stepTypes = onStep.mock.calls.map(([event]) => event.type);
+      expect(stepTypes).toEqual(['thinking', 'delta', 'delta', 'done']);
+      expect(onStep).toHaveBeenCalledWith({ type: 'delta', content: 'hel' });
+      expect(onStep).toHaveBeenCalledWith({ type: 'delta', content: 'lo' });
+    });
+
     it('does not fetch or send tool definitions when the caller lacks TOOL_EXECUTE', async () => {
       rbacService.hasPermission.mockResolvedValueOnce(false);
       openAiService.createChatCompletion.mockResolvedValueOnce({
