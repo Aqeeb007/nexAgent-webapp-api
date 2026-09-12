@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ToolsService } from './tools.service';
 import { DATABASE } from '../database/database.module';
@@ -166,11 +167,13 @@ describe('ToolsService', () => {
   });
 
   // Per-type behavior lives in each executor's own spec (see
-  // src/tools/executors/*.spec.ts) — ToolsService.execute is just a
-  // one-line delegate to ToolExecutorRegistry, so these tests only cover
-  // that delegation.
+  // src/tools/executors/*.spec.ts) — ToolsService.execute delegates to
+  // ToolExecutorRegistry and logs a warning when the executor reports
+  // failure, so these tests cover that delegation and logging.
   describe('execute', () => {
     const httpTool = {
+      id: 'tool-1',
+      name: 'Weather API',
       type: 'http',
       config: { url: 'https://example.com/weather', method: 'GET' },
     };
@@ -186,7 +189,10 @@ describe('ToolsService', () => {
     });
 
     it('defaults a null config to an empty object before delegating', async () => {
-      await service.execute({ type: 'http', config: null }, {});
+      await service.execute(
+        { id: 'tool-1', name: 'Weather API', type: 'http', config: null },
+        {},
+      );
 
       expect(mockExecutor.execute).toHaveBeenCalledWith({}, {});
     });
@@ -197,8 +203,29 @@ describe('ToolsService', () => {
       });
 
       await expect(
-        service.execute({ type: 'db', config: {} }, {}),
+        service.execute(
+          { id: 'tool-1', name: 'DB Tool', type: 'db', config: {} },
+          {},
+        ),
       ).rejects.toThrow('Unsupported tool type: db');
+    });
+
+    it('logs a warning when the executor reports failure', async () => {
+      mockExecutor.execute.mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        body: { error: 'boom' },
+      });
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+
+      await service.execute(httpTool, { city: 'NYC' });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Weather API'),
+      );
+      warnSpy.mockRestore();
     });
   });
 });

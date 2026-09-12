@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import {
@@ -36,6 +36,8 @@ type ToolRow = typeof tools.$inferSelect;
 
 @Injectable()
 export class ToolsService {
+  private readonly logger = new Logger(ToolsService.name);
+
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly executorRegistry: ToolExecutorRegistry,
@@ -96,11 +98,23 @@ export class ToolsService {
   }
 
   async execute(
-    tool: Pick<ToolRow, 'type' | 'config'>,
+    tool: Pick<ToolRow, 'id' | 'name' | 'type' | 'config'>,
     args: Record<string, unknown>,
   ): Promise<ToolExecutionResult> {
-    return this.executorRegistry
+    const result = await this.executorRegistry
       .get(tool.type)
       .execute(tool.config ?? {}, args);
+
+    // Single choke point for every executor (database/HTTP/custom-JS, and
+    // any future type) — logged here rather than inside each executor so
+    // failures are visible without duplicating a logger in every one of
+    // them. Only the failure path logs, so a healthy tool stays silent.
+    if (!result.ok) {
+      this.logger.warn(
+        `Tool "${tool.name}" (${tool.type}, id=${tool.id}) failed: ${JSON.stringify(result.body)}`,
+      );
+    }
+
+    return result;
   }
 }

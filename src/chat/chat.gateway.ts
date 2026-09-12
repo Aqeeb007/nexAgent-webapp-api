@@ -1,4 +1,4 @@
-import { UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -37,6 +37,8 @@ type AuthenticatedSocket = Omit<Socket, 'data'> & {
   },
 })
 export class ChatGateway implements OnGatewayConnection {
+  private readonly logger = new Logger(ChatGateway.name);
+
   @WebSocketServer()
   server!: Server;
 
@@ -144,6 +146,12 @@ export class ChatGateway implements OnGatewayConnection {
       );
       client.emit('messageSent', result);
     } catch (error) {
+      this.logger.error(
+        `sendMessage failed for conversation ${dto.conversationId}: ${
+          error instanceof Error ? error.message : error
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
       client.emit('sendMessageError', {
         message:
           error instanceof Error ? error.message : 'Failed to send message',

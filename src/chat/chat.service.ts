@@ -226,6 +226,12 @@ export class ChatService {
             (agent.configuration as AgentConfiguration | null) ?? undefined,
         });
       } catch (error) {
+        this.logger.error(
+          `Chat completion request failed for agent ${agentId}: ${
+            error instanceof Error ? error.message : error
+          }`,
+          error instanceof Error ? error.stack : undefined,
+        );
         throw new BadGatewayException(
           error instanceof Error
             ? error.message
