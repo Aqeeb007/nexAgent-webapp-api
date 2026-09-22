@@ -4,6 +4,7 @@ import { Reflector } from '@nestjs/core';
 import { OrganizationsController } from './organizations.controller';
 import { OrganizationsService } from './organizations.service';
 import { OrganizationMembersService } from './organization-members.service';
+import { UsersService } from '../users/users.service';
 import { RbacService } from '../rbac/rbac.service';
 
 describe('OrganizationsController', () => {
@@ -16,6 +17,9 @@ describe('OrganizationsController', () => {
   let organizationMembersService: {
     addMemberByEmail: jest.Mock;
     listMembers: jest.Mock;
+  };
+  let usersService: {
+    updateLastActiveOrganization: jest.Mock;
   };
 
   const currentUser = { id: 'user-1' };
@@ -30,6 +34,9 @@ describe('OrganizationsController', () => {
       addMemberByEmail: jest.fn(),
       listMembers: jest.fn(),
     };
+    usersService = {
+      updateLastActiveOrganization: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [OrganizationsController],
@@ -39,6 +46,7 @@ describe('OrganizationsController', () => {
           provide: OrganizationMembersService,
           useValue: organizationMembersService,
         },
+        { provide: UsersService, useValue: usersService },
         // The controller carries @UseGuards(PermissionGuard) as class
         // metadata, so Nest instantiates PermissionGuard as part of
         // compiling this module even though these tests call controller
@@ -101,6 +109,20 @@ describe('OrganizationsController', () => {
       await expect(controller.findCurrent('missing')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('setActive', () => {
+    it("persists the header org as the caller's last active organization", async () => {
+      usersService.updateLastActiveOrganization.mockResolvedValue(undefined);
+
+      const result = await controller.setActive('org-1', currentUser);
+
+      expect(usersService.updateLastActiveOrganization).toHaveBeenCalledWith(
+        currentUser.id,
+        'org-1',
+      );
+      expect(result).toBeUndefined();
     });
   });
 

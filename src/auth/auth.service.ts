@@ -26,6 +26,11 @@ interface AuthenticatedUser {
   email: string;
 }
 
+interface UserWithLastActiveOrganization {
+  id: string;
+  lastActiveOrganizationId: string | null;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -58,15 +63,24 @@ export class AuthService {
         tx,
       );
 
+      await this.usersService.updateLastActiveOrganization(
+        user.id,
+        organization.id,
+        tx,
+      );
+
       return { user, organization };
     });
 
     // The frontend treats a successful register the same as a login (it
     // redirects straight into the app), so register must hand back the same
-    // token-pair shape login() does — not just the created rows.
+    // token-pair shape login() does — not just the created rows. That
+    // includes `organizationId`, alongside the full `organization` object,
+    // so the frontend can seed its org selection the same way for both
+    // register and login instead of special-casing one of them.
     const tokens = await this.issueTokenPair(user);
 
-    return { ...tokens, user, organization };
+    return { ...tokens, user, organization, organizationId: organization.id };
   }
 
   async login(dto: LoginDto) {
@@ -84,6 +98,7 @@ export class AuthService {
     }
 
     const tokens = await this.issueTokenPair(user);
+    const organizationId = await this.resolveActiveOrganizationId(user);
 
     return {
       ...tokens,
@@ -94,7 +109,35 @@ export class AuthService {
         lastName: user.lastName,
         emailVerified: user.emailVerified,
       },
+      organizationId,
     };
+  }
+
+  // Picks which org the frontend should open the user into: the org they were
+  // last active in, if they're still a member of it, otherwise their
+  // longest-standing membership (findUserOrganizations is ordered by
+  // membership age so this is deterministic, not "whatever Postgres felt like
+  // returning first").
+  private async resolveActiveOrganizationId(
+    user: UserWithLastActiveOrganization,
+  ): Promise<string | null> {
+    const memberships = await this.organizationsService.findUserOrganizations(
+      user.id,
+    );
+
+    if (memberships.length === 0) {
+      return null;
+    }
+
+    const lastActiveStillValid = memberships.some(
+      (membership) => membership.id === user.lastActiveOrganizationId,
+    );
+
+    if (user.lastActiveOrganizationId && lastActiveStillValid) {
+      return user.lastActiveOrganizationId;
+    }
+
+    return memberships[0].id;
   }
 
   async refresh(dto: RefreshTokenDto) {

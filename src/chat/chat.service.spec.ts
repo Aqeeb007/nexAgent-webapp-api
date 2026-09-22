@@ -9,6 +9,8 @@ import { AgentDocumentsService } from '../agent-documents/agent-documents.servic
 import { ToolsService } from '../tools/tools.service';
 import { OpenAiService } from '../openai/openai.service';
 import { RbacService } from '../rbac/rbac.service';
+import { UsageService } from '../usage/usage.service';
+import { USAGE_EVENT_TYPES } from '../usage/constants/usage-event-types';
 
 interface CreateChatCompletionCallArg {
   tools?: { function: { name: string } }[];
@@ -35,6 +37,7 @@ describe('ChatService', () => {
     createEmbeddings: jest.Mock;
   };
   let rbacService: { hasPermission: jest.Mock };
+  let usageService: { record: jest.Mock };
 
   const organizationId = 'org-1';
   const agentId = 'agent-1';
@@ -77,9 +80,12 @@ describe('ChatService', () => {
     toolsService = { execute: jest.fn() };
     openAiService = {
       createChatCompletion: jest.fn(),
-      createEmbeddings: jest.fn().mockResolvedValue([[0.1, 0.2, 0.3]]),
+      createEmbeddings: jest
+        .fn()
+        .mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]], totalTokens: 5 }),
     };
     rbacService = { hasPermission: jest.fn().mockResolvedValue(false) };
+    usageService = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -91,6 +97,7 @@ describe('ChatService', () => {
         { provide: ToolsService, useValue: toolsService },
         { provide: OpenAiService, useValue: openAiService },
         { provide: RbacService, useValue: rbacService },
+        { provide: UsageService, useValue: usageService },
       ],
     }).compile();
 
@@ -517,6 +524,158 @@ describe('ChatService', () => {
         conversation.id,
         'user',
         'hi',
+      );
+    });
+  });
+
+  describe('usage recording', () => {
+    it('records chat_completion usage once per round using the totals OpenAI reports', async () => {
+      openAiService.createChatCompletion.mockResolvedValueOnce({
+        content: 'hello',
+        tool_calls: undefined,
+        usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
+      });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
+
+      expect(usageService.record).toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.CHAT_COMPLETION,
+        14,
+        expect.objectContaining({ agentId, model: agent.model }),
+      );
+    });
+
+    it('does not record chat_completion usage when OpenAI reports none', async () => {
+      openAiService.createChatCompletion.mockResolvedValueOnce({
+        content: 'hello',
+        tool_calls: undefined,
+      });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
+
+      expect(usageService.record).not.toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.CHAT_COMPLETION,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('records embedding usage for the RAG query embedding', async () => {
+      openAiService.createChatCompletion.mockResolvedValueOnce({
+        content: 'hello',
+        tool_calls: undefined,
+      });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
+
+      expect(usageService.record).toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.EMBEDDING,
+        5,
+        expect.objectContaining({ source: 'rag_query', agentId }),
+      );
+    });
+
+    it('records tool_execution usage once per executed tool call', async () => {
+      rbacService.hasPermission.mockResolvedValueOnce(true);
+      const tool = {
+        id: 't1',
+        name: 'weather',
+        type: 'http',
+        config: { url: 'https://example.com', method: 'GET' },
+        description: 'Gets weather',
+        parameters: {
+          type: 'object',
+          properties: { city: { type: 'string' } },
+        },
+      };
+      agentToolsService.listFull.mockResolvedValueOnce([tool]);
+
+      openAiService.createChatCompletion
+        .mockResolvedValueOnce({
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-1',
+              type: 'function',
+              function: { name: 'weather', arguments: '{"city":"NYC"}' },
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ content: "it's sunny", tool_calls: undefined });
+
+      toolsService.execute.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: { temp: 72 },
+      });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'weather?',
+      );
+
+      expect(usageService.record).toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.TOOL_EXECUTION,
+        1,
+        expect.objectContaining({ agentId, toolId: 't1', toolName: 'weather' }),
+      );
+    });
+
+    it('does not record tool_execution usage for an unknown/unavailable tool', async () => {
+      rbacService.hasPermission.mockResolvedValueOnce(true);
+      agentToolsService.listFull.mockResolvedValueOnce([]);
+
+      openAiService.createChatCompletion
+        .mockResolvedValueOnce({
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-1',
+              type: 'function',
+              function: { name: 'ghost-tool', arguments: '{}' },
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ content: 'done', tool_calls: undefined });
+
+      await service.sendMessage(
+        agentId,
+        conversation.id,
+        organizationId,
+        userId,
+        'hi',
+      );
+
+      expect(usageService.record).not.toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.TOOL_EXECUTION,
+        expect.anything(),
+        expect.anything(),
       );
     });
   });

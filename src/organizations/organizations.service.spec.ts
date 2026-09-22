@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import { OrganizationMembersService } from './organization-members.service';
+import { organizationMembers } from '../database/schema/organization-members';
 import { RolesService } from '../rbac/roles.service';
 import { DATABASE } from '../database/database.module';
 import { ROLES } from '../rbac/constants/roles';
@@ -21,6 +22,7 @@ describe('OrganizationsService', () => {
     from: jest.Mock;
     innerJoin: jest.Mock;
     where: jest.Mock;
+    orderBy: jest.Mock;
     limit: jest.Mock;
     insert: jest.Mock;
     values: jest.Mock;
@@ -41,6 +43,7 @@ describe('OrganizationsService', () => {
       from: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn(),
       limit: jest.fn(),
       insert: jest.fn().mockReturnThis(),
       values: jest.fn().mockReturnThis(),
@@ -201,13 +204,21 @@ describe('OrganizationsService', () => {
           role: { id: 'role-1', name: 'Owner', slug: 'owner' },
         },
       ];
-      mockDb.where.mockResolvedValueOnce(rows);
+      mockDb.orderBy.mockResolvedValueOnce(rows);
 
       const result = await service.findUserOrganizations('user-1');
 
       expect(mockDb.select).toHaveBeenCalled();
       expect(mockDb.innerJoin).toHaveBeenCalledTimes(2);
       expect(result).toEqual(rows);
+    });
+
+    it('orders by membership age, so the result is deterministic across calls', async () => {
+      mockDb.orderBy.mockResolvedValueOnce([]);
+
+      await service.findUserOrganizations('user-1');
+
+      expect(mockDb.orderBy).toHaveBeenCalledWith(organizationMembers.createdAt);
     });
   });
 });

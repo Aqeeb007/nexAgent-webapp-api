@@ -38,6 +38,19 @@ export class UsersService {
     return result[0] ?? null;
   }
 
+  async updateLastActiveOrganization(
+    userId: string,
+    organizationId: string | null,
+    tx?: Transaction,
+  ) {
+    const executor = tx ?? this.db;
+
+    await executor
+      .update(users)
+      .set({ lastActiveOrganizationId: organizationId, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  }
+
   async createUser(
     data: {
       email: string;

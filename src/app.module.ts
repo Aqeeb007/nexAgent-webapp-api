@@ -17,6 +17,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { AgentDocumentsModule } from './agent-documents/agent-documents.module';
 import { OpenAiModule } from './openai/openai.module';
 import { ChatModule } from './chat/chat.module';
+import { UsageModule } from './usage/usage.module';
 import * as Joi from 'joi';
 
 @Module({
@@ -52,6 +53,7 @@ import * as Joi from 'joi';
     AgentDocumentsModule,
     OpenAiModule,
     ChatModule,
+    UsageModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: JwtAuthGuard }],

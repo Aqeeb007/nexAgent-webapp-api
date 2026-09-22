@@ -6,6 +6,8 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
+import { organizations } from './organizations';
+
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
 
@@ -28,6 +30,14 @@ export const users = pgTable('users', {
   }).notNull(),
 
   emailVerified: boolean('email_verified').notNull().default(false),
+
+  // Which org to land the user in on their next login. Nullable, and
+  // deliberately `onDelete: 'set null'` rather than the usual cascade — losing
+  // this org membership should clear the pointer, not delete the user.
+  lastActiveOrganizationId: uuid('last_active_organization_id').references(
+    () => organizations.id,
+    { onDelete: 'set null' },
+  ),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
 

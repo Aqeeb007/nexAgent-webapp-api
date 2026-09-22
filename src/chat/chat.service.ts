@@ -20,6 +20,8 @@ import {
 } from '../openai/openai.service';
 import { RbacService } from '../rbac/rbac.service';
 import { PERMISSIONS } from '../rbac/constants/permissions';
+import { UsageService } from '../usage/usage.service';
+import { USAGE_EVENT_TYPES } from '../usage/constants/usage-event-types';
 
 import {
   ConversationsService,
@@ -75,6 +77,7 @@ export class ChatService {
     private readonly toolsService: ToolsService,
     private readonly openAiService: OpenAiService,
     private readonly rbacService: RbacService,
+    private readonly usageService: UsageService,
   ) {}
 
   async createConversation(
@@ -146,9 +149,17 @@ export class ChatService {
     let knowledgeMessage: ChatCompletionMessageParam | undefined;
 
     try {
-      const [queryEmbedding] = await this.openAiService.createEmbeddings([
-        userMessage,
-      ]);
+      const { embeddings, totalTokens } =
+        await this.openAiService.createEmbeddings([userMessage]);
+      const [queryEmbedding] = embeddings;
+
+      await this.usageService.record(
+        organizationId,
+        USAGE_EVENT_TYPES.EMBEDDING,
+        totalTokens,
+        { source: 'rag_query', agentId },
+      );
+
       const chunks = await this.agentDocumentsService.searchRelevant(
         agentId,
         organizationId,
@@ -244,6 +255,20 @@ export class ChatService {
         );
       }
 
+      if (choice.usage) {
+        await this.usageService.record(
+          organizationId,
+          USAGE_EVENT_TYPES.CHAT_COMPLETION,
+          choice.usage.totalTokens,
+          {
+            agentId,
+            model: agent.model,
+            promptTokens: choice.usage.promptTokens,
+            completionTokens: choice.usage.completionTokens,
+          },
+        );
+      }
+
       if (!choice.tool_calls?.length) {
         const finalMessage = await this.conversationsService.appendMessage(
           conversation.id,
@@ -292,6 +317,15 @@ export class ChatService {
               status: 0,
               body: { error: `Unknown or unavailable tool: ${toolName}` },
             };
+
+        if (tool) {
+          await this.usageService.record(
+            organizationId,
+            USAGE_EVENT_TYPES.TOOL_EXECUTION,
+            1,
+            { agentId, toolId: tool.id, toolName },
+          );
+        }
 
         await this.conversationsService.appendMessage(
           conversation.id,

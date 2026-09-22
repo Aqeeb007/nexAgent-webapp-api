@@ -13,6 +13,7 @@ import { AgentToolsModule } from '../agent-tools/agent-tools.module';
 import { AgentDocumentsModule } from '../agent-documents/agent-documents.module';
 import { ToolsModule } from '../tools/tools.module';
 import { OpenAiModule } from '../openai/openai.module';
+import { UsageModule } from '../usage/usage.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OpenAiModule } from '../openai/openai.module';
     AgentDocumentsModule,
     ToolsModule,
     OpenAiModule,
+    UsageModule,
     // Registered locally (mirrors AuthModule's own JwtModule.registerAsync)
     // rather than importing AuthModule, which would pull in
     // UsersModule/OrganizationsModule as an unwanted transitive dependency

@@ -32,6 +32,7 @@ describe('AuthService', () => {
     createUser: jest.Mock;
     findByEmail: jest.Mock;
     findById: jest.Mock;
+    updateLastActiveOrganization: jest.Mock;
   };
   let mockTokenService: {
     signAccessToken: jest.Mock;
@@ -45,7 +46,10 @@ describe('AuthService', () => {
     findValidByHash: jest.Mock;
     revokeByHash: jest.Mock;
   };
-  let mockOrganizationsService: { createOwned: jest.Mock };
+  let mockOrganizationsService: {
+    createOwned: jest.Mock;
+    findUserOrganizations: jest.Mock;
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -66,6 +70,7 @@ describe('AuthService', () => {
       createUser: jest.fn(),
       findByEmail: jest.fn(),
       findById: jest.fn(),
+      updateLastActiveOrganization: jest.fn(),
     };
     mockTokenService = {
       signAccessToken: jest.fn(),
@@ -81,6 +86,7 @@ describe('AuthService', () => {
     };
     mockOrganizationsService = {
       createOwned: jest.fn(),
+      findUserOrganizations: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -156,6 +162,13 @@ describe('AuthService', () => {
         mockTx,
       );
 
+      // The freshly created org becomes the user's active org right away, so
+      // a later login (before they ever switch orgs) reopens it instead of
+      // falling back to "oldest membership".
+      expect(
+        mockUsersService.updateLastActiveOrganization,
+      ).toHaveBeenCalledWith(insertedUser.id, insertedOrganization.id, mockTx);
+
       expect(mockRefreshTokensService.create).toHaveBeenCalledWith(
         insertedUser.id,
         'hashed-refresh-token',
@@ -168,6 +181,7 @@ describe('AuthService', () => {
         refreshToken: 'refresh-token',
         user: insertedUser,
         organization: insertedOrganization,
+        organizationId: insertedOrganization.id,
       });
     });
 
@@ -209,10 +223,14 @@ describe('AuthService', () => {
       firstName: 'Jane',
       lastName: 'Doe',
       emailVerified: false,
+      lastActiveOrganizationId: 'org-2',
     };
+    const memberships = [
+      { id: 'org-1', name: 'Oldest Org', slug: 'oldest-org' },
+      { id: 'org-2', name: 'Newer Org', slug: 'newer-org' },
+    ];
 
-    it('returns tokens and a sanitized user on success', async () => {
-      mockUsersService.findByEmail.mockResolvedValueOnce(storedUser);
+    function mockSuccessfulAuth() {
       (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
       mockTokenService.signAccessToken.mockResolvedValueOnce('access-token');
       mockTokenService.signRefreshToken.mockResolvedValueOnce('refresh-token');
@@ -220,6 +238,14 @@ describe('AuthService', () => {
       mockTokenService.decodeExpiry.mockReturnValueOnce(
         new Date('2099-01-01T00:00:00Z'),
       );
+    }
+
+    it('returns tokens, a sanitized user, and the user\'s last active org on success', async () => {
+      mockUsersService.findByEmail.mockResolvedValueOnce(storedUser);
+      mockOrganizationsService.findUserOrganizations.mockResolvedValueOnce(
+        memberships,
+      );
+      mockSuccessfulAuth();
 
       const result = await service.login(loginDto);
 
@@ -243,7 +269,52 @@ describe('AuthService', () => {
           lastName: storedUser.lastName,
           emailVerified: storedUser.emailVerified,
         },
+        organizationId: 'org-2',
       });
+    });
+
+    it('falls back to the oldest membership when the user has no last active org yet', async () => {
+      mockUsersService.findByEmail.mockResolvedValueOnce({
+        ...storedUser,
+        lastActiveOrganizationId: null,
+      });
+      mockOrganizationsService.findUserOrganizations.mockResolvedValueOnce(
+        memberships,
+      );
+      mockSuccessfulAuth();
+
+      const result = await service.login(loginDto);
+
+      // findUserOrganizations is ordered by membership age, so [0] is the
+      // deterministic "oldest" org to default into.
+      expect(result.organizationId).toBe('org-1');
+    });
+
+    it('falls back to the oldest membership when the last active org is no longer valid (removed/deleted)', async () => {
+      mockUsersService.findByEmail.mockResolvedValueOnce({
+        ...storedUser,
+        lastActiveOrganizationId: 'org-stale',
+      });
+      mockOrganizationsService.findUserOrganizations.mockResolvedValueOnce(
+        memberships,
+      );
+      mockSuccessfulAuth();
+
+      const result = await service.login(loginDto);
+
+      expect(result.organizationId).toBe('org-1');
+    });
+
+    it('returns a null organizationId when the user belongs to no organization', async () => {
+      mockUsersService.findByEmail.mockResolvedValueOnce(storedUser);
+      mockOrganizationsService.findUserOrganizations.mockResolvedValueOnce(
+        [],
+      );
+      mockSuccessfulAuth();
+
+      const result = await service.login(loginDto);
+
+      expect(result.organizationId).toBeNull();
     });
 
     it('still calls bcrypt.compare (against a dummy hash) when no user is found, to avoid a timing side-channel', async () => {

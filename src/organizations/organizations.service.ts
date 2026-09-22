@@ -98,6 +98,10 @@ export class OrganizationsService {
   }
 
   async findUserOrganizations(userId: string) {
+    // Ordered by membership age: without an explicit ORDER BY, Postgres does
+    // not guarantee row order, so callers that default to "the first org in
+    // the list" (e.g. AuthService picking a fallback on login) would get a
+    // different org back on different requests even though nothing changed.
     return this.db
       .select({
         id: organizations.id,
@@ -115,7 +119,8 @@ export class OrganizationsService {
         eq(organizationMembers.organizationId, organizations.id),
       )
       .innerJoin(roles, eq(organizationMembers.roleId, roles.id))
-      .where(eq(organizationMembers.userId, userId));
+      .where(eq(organizationMembers.userId, userId))
+      .orderBy(organizationMembers.createdAt);
   }
 
   private generateSlug(name: string): string {

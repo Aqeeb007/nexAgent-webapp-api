@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DocumentsService } from './documents.service';
 import { DATABASE } from '../database/database.module';
 import { OpenAiService } from '../openai/openai.service';
+import { UsageService } from '../usage/usage.service';
+import { USAGE_EVENT_TYPES } from '../usage/constants/usage-event-types';
 
 jest.mock('pdf-parse', () => jest.fn());
 import pdfParse from 'pdf-parse';
@@ -23,6 +25,7 @@ describe('DocumentsService', () => {
     transaction: jest.Mock;
   };
   let mockOpenAiService: { createEmbeddings: jest.Mock };
+  let mockUsageService: { record: jest.Mock };
 
   const organizationId = 'org-1';
   const processingDocument = {
@@ -53,12 +56,14 @@ describe('DocumentsService', () => {
     );
 
     mockOpenAiService = { createEmbeddings: jest.fn() };
+    mockUsageService = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DocumentsService,
         { provide: DATABASE, useValue: mockDb },
         { provide: OpenAiService, useValue: mockOpenAiService },
+        { provide: UsageService, useValue: mockUsageService },
       ],
     }).compile();
 
@@ -79,9 +84,10 @@ describe('DocumentsService', () => {
       (pdfParse as unknown as jest.Mock).mockResolvedValueOnce({
         text: 'hello world',
       });
-      mockOpenAiService.createEmbeddings.mockResolvedValueOnce([
-        [0.1, 0.2, 0.3],
-      ]);
+      mockOpenAiService.createEmbeddings.mockResolvedValueOnce({
+        embeddings: [[0.1, 0.2, 0.3]],
+        totalTokens: 3,
+      });
 
       const result = await service.create(
         organizationId,
@@ -94,6 +100,12 @@ describe('DocumentsService', () => {
       ]);
       expect(mockDb.transaction).toHaveBeenCalled();
       expect(result).toMatchObject({ status: 'ready', chunkCount: 1 });
+      expect(mockUsageService.record).toHaveBeenCalledWith(
+        organizationId,
+        USAGE_EVENT_TYPES.EMBEDDING,
+        3,
+        expect.objectContaining({ source: 'document_upload' }),
+      );
     });
 
     it('marks the document failed instead of throwing when parsing yields no text', async () => {

@@ -5,6 +5,8 @@ import {
   Body,
   UseGuards,
   NotFoundException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 
 import { OrganizationsService } from './organizations.service';
@@ -16,6 +18,7 @@ import { PermissionGuard } from '../rbac/guards/permission.guard';
 import { RequirePermission } from '../rbac/decorators/require-permission.decorator';
 import { PERMISSIONS } from '../rbac/constants/permissions';
 
+import { UsersService } from '../users/users.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { OrganizationId } from '../common/decorators/organization-id.decorator';
 import type { AuthenticatedUser } from '../common/types/express';
@@ -26,6 +29,7 @@ export class OrganizationsController {
   constructor(
     private readonly organizationsService: OrganizationsService,
     private readonly organizationMembersService: OrganizationMembersService,
+    private readonly usersService: UsersService,
   ) {}
 
   @Post()
@@ -55,6 +59,22 @@ export class OrganizationsController {
     }
 
     return organization;
+  }
+
+  // Called when the user switches org in the UI, so the next login can
+  // restore them into this org instead of falling back to their oldest
+  // membership (see AuthService.resolveActiveOrganizationId).
+  @Post('active')
+  @RequirePermission(PERMISSIONS.ORGANIZATION_READ)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setActive(
+    @OrganizationId() organizationId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.usersService.updateLastActiveOrganization(
+      user.id,
+      organizationId,
+    );
   }
 
   @Post('members')

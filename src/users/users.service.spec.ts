@@ -13,6 +13,8 @@ describe('UsersService', () => {
     insert: jest.Mock;
     values: jest.Mock;
     returning: jest.Mock;
+    update: jest.Mock;
+    set: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -27,6 +29,8 @@ describe('UsersService', () => {
       insert: jest.fn().mockReturnThis(),
       values: jest.fn().mockReturnThis(),
       returning: jest.fn(),
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -76,6 +80,48 @@ describe('UsersService', () => {
       const result = await service.findById('missing-id');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('updateLastActiveOrganization', () => {
+    it('sets lastActiveOrganizationId for the given user', async () => {
+      mockDb.where.mockResolvedValueOnce(undefined);
+
+      await service.updateLastActiveOrganization('user-1', 'org-1');
+
+      expect(mockDb.set).toHaveBeenCalledWith(
+        expect.objectContaining({ lastActiveOrganizationId: 'org-1' }),
+      );
+      expect(mockDb.where).toHaveBeenCalled();
+    });
+
+    it('clears lastActiveOrganizationId when passed null', async () => {
+      mockDb.where.mockResolvedValueOnce(undefined);
+
+      await service.updateLastActiveOrganization('user-1', null);
+
+      expect(mockDb.set).toHaveBeenCalledWith(
+        expect.objectContaining({ lastActiveOrganizationId: null }),
+      );
+    });
+
+    it('runs the update against the given transaction when one is provided', async () => {
+      const mockTx = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockResolvedValueOnce(undefined),
+      };
+
+      await service.updateLastActiveOrganization(
+        'user-1',
+        'org-1',
+        mockTx as unknown as Parameters<
+          typeof service.updateLastActiveOrganization
+        >[2],
+      );
+
+      expect(mockTx.update).toHaveBeenCalled();
+      expect(mockDb.update).not.toHaveBeenCalled();
     });
   });
 

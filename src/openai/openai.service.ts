@@ -34,12 +34,27 @@ interface CreateChatCompletionInput {
   configuration?: AgentConfiguration;
 }
 
+export interface ChatCompletionUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 // The subset of the SDK's ChatCompletionMessage that callers actually use —
 // role/refusal/annotations/audio are dropped since nothing here reads them,
 // and reconstructing them from a token stream wouldn't be meaningful anyway.
 export interface ChatCompletionResult {
   content: string | null;
   tool_calls?: ChatCompletionMessageToolCall[];
+  // Undefined only if the stream never sent a usage chunk (shouldn't happen
+  // given stream_options.include_usage below, but callers that meter usage
+  // should treat absence as "nothing to record", not as zero).
+  usage?: ChatCompletionUsage;
+}
+
+export interface EmbeddingsResult {
+  embeddings: number[][];
+  totalTokens: number;
 }
 
 // Accumulator for one in-progress tool call across the stream — id/type
@@ -85,13 +100,16 @@ const EMBEDDING_MODEL = 'text-embedding-3-small';
 export class OpenAiService {
   constructor(@Inject(OPENAI_CLIENT) private readonly client: OpenAI) {}
 
-  async createEmbeddings(input: string[]): Promise<number[][]> {
+  async createEmbeddings(input: string[]): Promise<EmbeddingsResult> {
     const response = await this.client.embeddings.create({
       model: EMBEDDING_MODEL,
       input,
     });
 
-    return response.data.map((embedding) => embedding.embedding);
+    return {
+      embeddings: response.data.map((embedding) => embedding.embedding),
+      totalTokens: response.usage.total_tokens,
+    };
   }
 
   async createChatCompletion(
@@ -103,13 +121,28 @@ export class OpenAiService {
       messages,
       tools: tools && tools.length > 0 ? tools : undefined,
       stream: true,
+      // Without this, OpenAI never sends a usage chunk on a streamed
+      // response at all — usage would silently be unrecordable.
+      stream_options: { include_usage: true },
       ...toOpenAiParams(configuration),
     });
 
     let content = '';
+    let usage: ChatCompletionUsage | undefined;
     const toolCallsByIndex = new Map<number, AccumulatingToolCall>();
 
     for await (const chunk of stream) {
+      // The final chunk of a stream_options.include_usage response carries
+      // usage with an empty choices array — check this before the `delta`
+      // guard below, or it'd be skipped.
+      if (chunk.usage) {
+        usage = {
+          promptTokens: chunk.usage.prompt_tokens,
+          completionTokens: chunk.usage.completion_tokens,
+          totalTokens: chunk.usage.total_tokens,
+        };
+      }
+
       const delta = chunk.choices[0]?.delta;
 
       if (!delta) {
@@ -154,6 +187,7 @@ export class OpenAiService {
     return {
       content: content || null,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage,
     };
   }
 }

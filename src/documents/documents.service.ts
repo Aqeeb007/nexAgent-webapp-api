@@ -7,6 +7,8 @@ import { documents } from '../database/schema/documents';
 import { documentChunks } from '../database/schema/document-chunks';
 
 import { OpenAiService } from '../openai/openai.service';
+import { UsageService } from '../usage/usage.service';
+import { USAGE_EVENT_TYPES } from '../usage/constants/usage-event-types';
 
 import { chunkText } from './chunk-text';
 import { MAX_EXTRACTED_CHARS } from './upload-limits';
@@ -29,6 +31,7 @@ export class DocumentsService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     private readonly openAiService: OpenAiService,
+    private readonly usageService: UsageService,
   ) {}
 
   // Synchronous end to end (no queue, by design — see docs/ROADMAP.md Phase
@@ -52,7 +55,15 @@ export class DocumentsService {
         throw new Error('No extractable text found in this PDF');
       }
 
-      const embeddings = await this.openAiService.createEmbeddings(chunks);
+      const { embeddings, totalTokens } =
+        await this.openAiService.createEmbeddings(chunks);
+
+      await this.usageService.record(
+        organizationId,
+        USAGE_EVENT_TYPES.EMBEDDING,
+        totalTokens,
+        { source: 'document_upload', documentId: document.id },
+      );
 
       const [ready] = await this.db.transaction(async (tx) => {
         await tx.insert(documentChunks).values(

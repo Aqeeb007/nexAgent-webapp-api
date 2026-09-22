@@ -252,23 +252,60 @@ describe('OpenAiService', () => {
   });
 
   describe('createEmbeddings', () => {
-    it('returns embeddings in input order', async () => {
+    it('returns embeddings in input order alongside total token usage', async () => {
       mockClient.embeddings.create.mockResolvedValueOnce({
         data: [
           { index: 0, embedding: [0.1, 0.2] },
           { index: 1, embedding: [0.3, 0.4] },
         ],
+        usage: { prompt_tokens: 10, total_tokens: 10 },
       });
 
       const result = await service.createEmbeddings(['a', 'b']);
 
-      expect(result).toEqual([
-        [0.1, 0.2],
-        [0.3, 0.4],
-      ]);
+      expect(result).toEqual({
+        embeddings: [
+          [0.1, 0.2],
+          [0.3, 0.4],
+        ],
+        totalTokens: 10,
+      });
       expect(mockClient.embeddings.create).toHaveBeenCalledWith({
         model: 'text-embedding-3-small',
         input: ['a', 'b'],
+      });
+    });
+  });
+
+  describe('usage reporting on chat completions', () => {
+    it('requests include_usage and surfaces the final chunk\'s usage totals', async () => {
+      mockClient.chat.completions.create.mockResolvedValueOnce(
+        fakeStream([
+          contentChunk('ok'),
+          {
+            choices: [],
+            usage: {
+              prompt_tokens: 5,
+              completion_tokens: 2,
+              total_tokens: 7,
+            },
+          } as unknown as FakeChunk,
+        ]),
+      );
+
+      const result = await service.createChatCompletion({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+
+      const [call] = mockClient.chat.completions.create.mock.calls[0] as [
+        { stream_options?: { include_usage: boolean } },
+      ];
+      expect(call.stream_options).toEqual({ include_usage: true });
+      expect(result.usage).toEqual({
+        promptTokens: 5,
+        completionTokens: 2,
+        totalTokens: 7,
       });
     });
   });
