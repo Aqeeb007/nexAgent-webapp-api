@@ -26,6 +26,7 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.WORKFLOW_READ,
     PERMISSIONS.WORKFLOW_UPDATE,
     PERMISSIONS.WORKFLOW_DELETE,
+    PERMISSIONS.WORKFLOW_EXECUTE,
 
     PERMISSIONS.DOCUMENT_CREATE,
     PERMISSIONS.DOCUMENT_READ,
@@ -51,6 +52,7 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.WORKFLOW_CREATE,
     PERMISSIONS.WORKFLOW_READ,
     PERMISSIONS.WORKFLOW_UPDATE,
+    PERMISSIONS.WORKFLOW_EXECUTE,
 
     PERMISSIONS.DOCUMENT_CREATE,
     PERMISSIONS.DOCUMENT_READ,
@@ -69,6 +71,10 @@ export const ROLE_PERMISSIONS = {
     // that config in full with no masking. Restricting to admin+owner is
     // the deliberate MVP posture; see the Phase 3 plan for the reasoning.
 
+    // No WORKFLOW_EXECUTE for members — a run can trigger real outbound
+    // tool calls and real OpenAI spend, same trust tier as TOOL_EXECUTE
+    // above. Members can still design workflows (create/read), just not
+    // run them.
     PERMISSIONS.WORKFLOW_CREATE,
     PERMISSIONS.WORKFLOW_READ,
 

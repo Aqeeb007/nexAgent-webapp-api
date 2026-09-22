@@ -21,9 +21,9 @@ re-derive it from scratch:
 
 **MVP first, then the documented V2 order — don't skip ahead of it.** The MVP flow in
 [docs/MVP_REQUIREMENTS.md](./docs/MVP_REQUIREMENTS.md#mvp-definition-of-done) is complete and
-live-verified, and Phase 5 (RAG) is now done too (see status below), so the "don't build this yet"
-list is: Kubernetes, microservices, Kafka, a workflow engine, Background Jobs/BullMQ, or a full
-observability stack, until the phases ahead of them in
+live-verified, and Phase 5 (RAG) and the Workflow Engine are now done too (see status below), so
+the "don't build this yet" list is: Kubernetes, microservices, Kafka, Background Jobs/BullMQ,
+Scheduling, Webhooks, or a full observability stack, until the phases ahead of them in
 [docs/ROADMAP.md#post-mvp-progression-v2-and-beyond](./docs/ROADMAP.md#post-mvp-progression-v2-and-beyond)
 are done. If a request seems to call for something further down that list than the current phase,
 flag it and point back to this file rather than building it.
@@ -36,8 +36,15 @@ Phase 6 (chat + tool-calling loop, WebSocket streaming) are done. **Phase 5 — 
 → search, wired into agent chat — see
 [docs/ROADMAP.md](./docs/ROADMAP.md#phase-5--knowledge-base-rag) for detail. Local dev Postgres now
 runs via `docker compose up -d` (`docker-compose.yml`, `pgvector/pgvector:pg16`) instead of a
-native install, to get the pgvector extension binary. Next up per the post-MVP progression: the
-Workflow Engine.
+native install, to get the pgvector extension binary. **The Workflow Engine is now also done and
+live-verified (2026-09-22)**: `src/workflows/` — a branching graph of `agent`/`tool`/`condition`
+steps connected by `workflow_step_edges` (a `condition` step is a switch that can route to any
+number of next steps, and different branches can rejoin on a shared downstream step; execution is
+still sequential — one active path at a time, no parallel fan-out), manual
+`POST /workflows/:id/execute` trigger, synchronous execution, every run persisted
+(`workflow_runs`/`workflow_step_runs`) — see
+[docs/ROADMAP.md](./docs/ROADMAP.md#workflow-engine-done-live-verified-2026-09-22) for detail. Next
+up per the post-MVP progression: Background Jobs (Redis + BullMQ).
 
 ## Stack at a glance
 

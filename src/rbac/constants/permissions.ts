@@ -22,6 +22,7 @@ export const PERMISSIONS = {
   WORKFLOW_READ: 'workflow:read',
   WORKFLOW_UPDATE: 'workflow:update',
   WORKFLOW_DELETE: 'workflow:delete',
+  WORKFLOW_EXECUTE: 'workflow:execute',
 
   DOCUMENT_CREATE: 'document:create',
   DOCUMENT_READ: 'document:read',
