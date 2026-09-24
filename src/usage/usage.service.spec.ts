@@ -102,16 +102,27 @@ describe('UsageService', () => {
   });
 
   describe('summaryByAgent', () => {
-    it('groups totals by agentId (from metadata) and event type, including a null-agentId bucket', async () => {
+    it('groups totals by agentId, source (both from metadata), and event type, including a null-agentId bucket', async () => {
       const rows = [
+        // Same agent, two different sources — direct chat and a workflow
+        // step must stay in separate buckets, not collapse into one total.
         {
           agentId: 'agent-1',
+          source: null,
           eventType: 'chat_completion',
           totalQuantity: 100,
           eventCount: 4,
         },
         {
+          agentId: 'agent-1',
+          source: 'workflow_step',
+          eventType: 'chat_completion',
+          totalQuantity: 40,
+          eventCount: 1,
+        },
+        {
           agentId: null,
+          source: 'document_upload',
           eventType: 'embedding',
           totalQuantity: 12,
           eventCount: 2,

@@ -4,7 +4,10 @@ import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { type Database, DATABASE } from '../database/database.module';
 import { usageEvents } from '../database/schema/usage-events';
 
-import { USAGE_EVENT_TYPES, type UsageEventType } from './constants/usage-event-types';
+import {
+  USAGE_EVENT_TYPES,
+  type UsageEventType,
+} from './constants/usage-event-types';
 
 @Injectable()
 export class UsageService {
@@ -70,10 +73,19 @@ export class UsageService {
   // that cost isn't attributable to one — those rows come back with
   // `agentId: null` rather than being dropped; the caller decides how to
   // label them (e.g. "Unassigned").
+  //
+  // `source` (also from `metadata`, also grouped on) is what lets the
+  // caller tell *how* an agent's usage was incurred, not just how much: a
+  // direct chat turn sets no `source`; a RAG-query/document-upload
+  // embedding sets 'rag_query'/'document_upload'; a workflow `agent`/`tool`
+  // step sets 'workflow_step'. Without this, the same agent's direct-chat
+  // usage and its workflow-triggered usage would collapse into one
+  // indistinguishable total.
   async summaryByAgent(organizationId: string, since: Date) {
     return this.db
       .select({
         agentId: sql<string | null>`${usageEvents.metadata}->>'agentId'`,
+        source: sql<string | null>`${usageEvents.metadata}->>'source'`,
         eventType: usageEvents.eventType,
         totalQuantity: sql<number>`sum(${usageEvents.quantity})`.mapWith(
           Number,
@@ -89,6 +101,7 @@ export class UsageService {
       )
       .groupBy(
         sql`${usageEvents.metadata}->>'agentId'`,
+        sql`${usageEvents.metadata}->>'source'`,
         usageEvents.eventType,
       );
   }
@@ -104,9 +117,7 @@ export class UsageService {
     return this.db
       .select({
         day: sql<string>`to_char(${day}, 'YYYY-MM-DD')`,
-        totalTokens: sql<number>`sum(${usageEvents.quantity})`.mapWith(
-          Number,
-        ),
+        totalTokens: sql<number>`sum(${usageEvents.quantity})`.mapWith(Number),
       })
       .from(usageEvents)
       .where(

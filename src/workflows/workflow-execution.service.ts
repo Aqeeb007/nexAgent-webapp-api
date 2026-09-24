@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 
 import { type Database, DATABASE } from '../database/database.module';
 import { workflowRuns } from '../database/schema/workflow-runs';
@@ -208,11 +208,14 @@ export class WorkflowExecutionService {
       throw new NotFoundException('Workflow not found');
     }
 
+    // Newest run first — same convention as conversations.service.ts's
+    // thread list (desc by createdAt), unlike a run's own stepRuns below
+    // which stay chronological (asc) since those are read top-to-bottom.
     return this.db
       .select(RUN_COLUMNS)
       .from(workflowRuns)
       .where(eq(workflowRuns.workflowId, workflowId))
-      .orderBy(asc(workflowRuns.startedAt));
+      .orderBy(desc(workflowRuns.startedAt));
   }
 
   async getRun(workflowId: string, runId: string, organizationId: string) {
